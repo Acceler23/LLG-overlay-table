@@ -7,27 +7,79 @@ html, body {
   overflow: hidden;
 }
 
+/* espaco transparente em cima: a foto do piloto sai do cartao ~48 px para cima */
+body { padding-top: 50px; }
+
 #card {
+  position: relative;
   display: flex;
   width: 560px;
   min-height: 120px;
   border-radius: 6px;
-  overflow: hidden;
   box-shadow: 0 4px 18px rgba(0,0,0,0.45);
 }
 
 #card.hidden { display: none; }
 
+/* ---- foto do piloto, a direita do nome, saindo do cartao para cima ----
+   Largura fixa (110 px); a foto ocupa a largura e e cortada embaixo no fim da
+   faixa do nome (a altura e calculada em driver-card.js), entao qualquer
+   formato de arquivo cabe. Sem fundo: a foto aparece recortada sobre o video. */
+.photo {
+  display: none;
+  position: absolute;
+  top: -100px; /* driver-card.js acerta a posicao e a altura */
+  right: 8px;
+  width: 110px;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 2;
+}
+
+#card.has-photo .photo { display: block; }
+#card.has-photo .names { padding-right: 110px; }
+
+.photo img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* ---- coluna da esquerda: posicao em cima, logo da equipe embaixo ---- */
 .pos-col {
-  width: 64px;
-  background: linear-gradient(180deg, #237fe8 0%, #1e4394 100%);
+  width: 72px;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  color: #ffffff;
+  border-radius: 6px 0 0 6px;
+  overflow: hidden;
+}
+
+/* posicao: fundo neutro, sem a cor da equipe */
+.pos-box {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
-  color: #ffffff;
-  padding: 8px 4px;
+  padding: 8px 4px 6px;
+  background: #0a2d52;
+}
+
+/* logo da equipe na cor principal dela (sem equipe no RLT: azul padrao) */
+.logo-box {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  background: var(--team-bg, #0e42a5);
+}
+
+.logo-box .team-logo {
+  max-width: 58px;
+  max-height: 44px;
+  object-fit: contain;
 }
 
 .pos-num {
@@ -51,6 +103,8 @@ html, body {
   display: flex;
   flex-direction: column;
   background: #0a2d52;
+  border-radius: 0 6px 6px 0;
+  overflow: hidden;
 }
 
 .class-bar {
@@ -62,16 +116,6 @@ html, body {
   min-height: 32px;
   display: flex;
   align-items: center;
-}
-
-/* Logo da equipe: fica na frente do nome do piloto, em destaque */
-.identity .team-logo {
-  height: 48px;
-  width: auto;
-  max-width: 96px;
-  object-fit: contain;
-  flex-shrink: 0;
-  filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.45));
 }
 
 .class-name {

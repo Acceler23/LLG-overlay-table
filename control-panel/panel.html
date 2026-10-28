@@ -133,7 +133,7 @@
         <input id="linkCard" type="text" readonly onclick="this.select()" />
         <button onclick="copyLink('linkCard')">Copiar</button>
       </div>
-      <div class="muted">Tamanhos sugeridos da fonte: tabela 880×1080 (a tabela tem 500 de largura; à direita dela ficam a pista, a volta rápida e, no LMU, pneus e VE), driver card 560×160.</div>
+      <div class="muted">Tamanhos sugeridos da fonte: tabela 880×1080 (a tabela tem 500 de largura; à direita dela ficam a pista, a volta rápida e, no LMU, pneus e VE), driver card 560×210 (os 50 de cima são o espaço para a foto do piloto sair do cartão).</div>
     </div>
 
     <h3>Durante a corrida</h3>
@@ -238,6 +238,18 @@
       </div>
     </div>
 
+    <h3>Fotos dos pilotos</h3>
+    <div class="box">
+      <div class="muted">Pasta com as fotos para o driver card. Nome do arquivo: <b>nome no RLT__nome no jogo.png</b>, ou só um dos dois (ex: <b>Ben Keating.png</b>); maiúsculas e acentos não importam. Qualquer formato de imagem: o cartão recorta a partir do topo. Vazio = pasta padrão.</div>
+      <div class="row">
+        <input id="avatarsPath" type="text" placeholder="C:\...\Fotos dos pilotos" />
+        <button onclick="saveAvatarsPath()">Salvar</button>
+        <button onclick="saveAvatarsPath(true)">Padrão</button>
+        <button onclick="openAvatarsFolder()">Abrir pasta</button>
+      </div>
+      <div class="muted" id="avatarsStatus"></div>
+    </div>
+
     <h3>Logos</h3>
     <div class="box">
       <div class="muted">Repositório com as pastas teams/ e cars/. Aceita link do GitHub ou raw. A overlay busca primeiro aqui e usa a pasta local como reserva. Vazio = só pasta local.</div>
@@ -288,6 +300,13 @@
       <div class="muted" id="carsetGame"></div>
       <div class="muted" id="carsetStatus"></div>
       <div id="carsetResult" class="muted" style="white-space:pre-wrap"></div>
+      <div class="sub">Pinturas antigas (_old_)</div>
+      <div class="muted">Ao trocar as pinturas, as antigas ficam guardadas com "_old_" no início do nome. Aqui dá para apagá-las de vez e liberar espaço. Isso não pode ser desfeito.</div>
+      <div class="row wrap">
+        <button onclick="checkOldLiveries()">Verificar</button>
+        <button id="oldDeleteBtn" onclick="deleteOldLiveries()" disabled>Apagar pinturas antigas</button>
+      </div>
+      <div class="muted" id="oldStatus"></div>
     </div>
   </section>
 

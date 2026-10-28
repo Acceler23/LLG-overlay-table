@@ -111,6 +111,23 @@ function broadcastAssetsConfig() {
   wss.broadcast({ type: "assetsConfig", data: assetsConfigPayload() });
 }
 
+// Fotos dos pilotos (driver card): pasta local fora do aplicativo, escolhida no
+// painel (server/avatars.js). A lista vai para as overlays, que acham a foto
+// pelo nome (overlay/shared/avatars.js); relida a cada 30 s.
+const avatars = require("./avatars");
+let avatarsPath = settings.get("avatarsPath") || avatars.ensureDefault();
+let avatarList = { files: [], version: "" };
+function avatarsPayload() {
+  return { type: "avatars", data: avatarList };
+}
+async function refreshAvatars() {
+  const next = avatars.list(avatarsPath);
+  if (next.files.join("|") === avatarList.files.join("|") && next.version === avatarList.version) return;
+  avatarList = next;
+  wss.broadcast(avatarsPayload());
+}
+setInterval(() => refreshAvatars().catch(() => {}), 30 * 1000);
+
 const app = express();
 app.use((req, res, next) => {
   if (isLocalRequest(req) || isLanOverlayRequest(req)) return next();
@@ -123,6 +140,9 @@ app.use((req, res, next) => {
 app.use(express.json());
 app.use("/overlay/assets", (req, res, next) => {
   express.static(assetsPath)(req, res, next);
+});
+app.use("/overlay/avatars", (req, res, next) => {
+  express.static(avatarsPath)(req, res, next);
 });
 app.use("/overlay", express.static(path.join(__dirname, "..", "overlay")));
 app.use("/panel", express.static(path.join(__dirname, "..", "control-panel")));
@@ -445,6 +465,7 @@ wss.onConnect((socket) => {
   }
   if (socket.readyState === 1) {
     socket.send(JSON.stringify({ type: "assetsConfig", data: assetsConfigPayload() }));
+    socket.send(JSON.stringify(avatarsPayload()));
   }
   if (socket.readyState === 1) socket.send(JSON.stringify(sessionLogPayload()));
   if (socket.readyState === 1 && trackStats.tracks.length) {
@@ -509,6 +530,33 @@ app.get("/api/carsets", async (req, res) => {
     });
   } catch (err) {
     res.status(502).json({ ok: false, error: err.message });
+  }
+});
+
+// Pinturas antigas ("_old_") que a instalacao de carsets deixou de lado
+app.get("/api/carsets/old", async (req, res) => {
+  try {
+    const gameDir = await findAms2Dir();
+    if (!gameDir) return res.status(404).json({ ok: false, error: "Automobilista 2 nao encontrado nas bibliotecas da Steam." });
+    res.json(Object.assign({ ok: true, gameDir, gameRunning: await carsets.isGameRunning() }, carsets.listOld(gameDir)));
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Apaga os "_old_" de vez (o painel pede confirmacao antes)
+app.post("/api/carsets/old/delete", async (req, res) => {
+  try {
+    if (!(req.body && req.body.confirm === true)) return res.status(400).json({ ok: false, error: "Falta confirmar." });
+    if (carsets.status().running) return res.status(409).json({ ok: false, error: "Ha uma instalacao de carset em andamento." });
+    if (await carsets.isGameRunning()) return res.status(409).json({ ok: false, error: "Feche o Automobilista 2 antes de apagar." });
+    const gameDir = await findAms2Dir();
+    if (!gameDir) return res.status(404).json({ ok: false, error: "Automobilista 2 nao encontrado nas bibliotecas da Steam." });
+    const result = carsets.deleteOld(gameDir);
+    console.log(`Pinturas antigas apagadas: ${result.deleted} itens, ${Math.round(result.bytes / 1048576)} MB`);
+    res.json(Object.assign({ ok: true }, result, carsets.listOld(gameDir)));
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
@@ -591,6 +639,30 @@ app.post("/api/assets/path", (req, res) => {
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
+});
+
+// ---- pasta das fotos dos pilotos (painel, aba Transmissao) ----
+function avatarsInfo() {
+  return { ok: true, path: avatarsPath, defaultPath: avatars.DEFAULT_DIR, isDefault: path.resolve(avatarsPath) === path.resolve(avatars.DEFAULT_DIR), exists: fs.existsSync(avatarsPath), count: avatars.list(avatarsPath).files.length };
+}
+
+app.get("/api/avatars", (req, res) => res.json(avatarsInfo()));
+
+app.post("/api/avatars/path", (req, res) => {
+  const raw = String((req.body && req.body.path) || "").trim();
+  const next = raw ? path.resolve(raw) : avatars.ensureDefault(); // vazio = pasta padrao
+  if (!fs.existsSync(next) || !fs.statSync(next).isDirectory()) return res.status(400).json({ ok: false, error: "Pasta não existe: " + next });
+  avatarsPath = next;
+  settings.set("avatarsPath", raw ? next : null);
+  refreshAvatars().catch(() => {});
+  res.json(avatarsInfo());
+});
+
+// abre a pasta das fotos no Explorador de Arquivos
+app.post("/api/avatars/open", (req, res) => {
+  if (!fs.existsSync(avatarsPath)) return res.status(404).json({ ok: false, error: "Pasta não existe: " + avatarsPath });
+  require("child_process").spawn("explorer.exe", [avatarsPath], { detached: true, stdio: "ignore" }).unref();
+  res.json({ ok: true });
 });
 
 app.get("/api/assets/base", (req, res) => {
@@ -877,6 +949,7 @@ ready.catch((err) => {
 });
 
 server.listen(HTTP_PORT, async () => {
+  refreshAvatars().catch(() => {}); // fotos dos pilotos (driver card)
   console.log(`Tabela de tempos em      http://localhost:${HTTP_PORT}/overlay/timing-table.html`);
   console.log(`Driver card overlay em   http://localhost:${HTTP_PORT}/overlay/driver-card.html`);
   console.log(`Tabela do piloto em      http://localhost:${HTTP_PORT}/overlay/driver-table.html`);

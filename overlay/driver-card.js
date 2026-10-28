@@ -70,9 +70,9 @@ function formatTime(ms) {
 
 // Mesmas regras de logo da tabela (shared/display.js), incluindo a lista
 // TEAM_LOGO_OVERRIDES do drivers-config.js.
-function setBgLogo(img, teamName, carName) {
+function setBgLogo(img, teamName, carName, variant) {
   if (!img) return;
-  logoLoader.load(img, LLGDisplay.logoPaths(teamName, carName, teamLogoOverrides));
+  logoLoader.load(img, LLGDisplay.logoPaths(teamName, carName, teamLogoOverrides, variant));
 }
 
 function rltDisplayName(entry) {
@@ -86,6 +86,46 @@ function rltDisplayName(entry) {
   if (info.displayName && String(info.displayName).trim()) return info.displayName;
   if (info.inGameName && String(info.inGameName).trim()) return info.inGameName;
   return fallback;
+}
+
+// ---- foto do piloto (shared/avatars.js) ----
+let avatarIndex = [];
+let avatarVersion = ""; // muda quando uma foto da pasta muda (recarrega)
+
+// nomes do piloto no RLT, para achar o arquivo "<nome no RLT>__<nome no jogo>"
+function rltNamesFor(entry) {
+  const info = rltLookup(entry);
+  if (!info) return [];
+  return [info.displayName, [info.firstName, info.lastName].filter(Boolean).join(" "), info.driverName].filter((n) => n && String(n).trim());
+}
+
+function setPhoto(entry) {
+  const card = document.getElementById("card");
+  const img = document.getElementById("photo");
+  const file = LLGAvatars.find(avatarIndex, rltNamesFor(entry), String(entry.name || "").replace(/\u200B+$/, ""));
+  card.classList.toggle("has-photo", !!file);
+  if (!file) {
+    img.removeAttribute("src");
+    img.dataset.file = "";
+    return;
+  }
+  // A base da foto fica no fim da faixa do nome e ela sobe um pouco acima do
+  // cartao. A altura acompanha a largura da foto (110 px no CSS), sempre com o
+  // mesmo enquadramento: 1,3 x a altura de "100 px acima do cartao ate o fim da
+  // faixa" para cada 100 px de largura. O espaco transparente em cima da pagina
+  // (body padding-top no CSS) precisa caber o quanto ela sobe (~48 px).
+  const identity = document.querySelector(".identity");
+  const bottom = identity.offsetTop + identity.offsetHeight;
+  const box = document.getElementById("photoBox");
+  const height = Math.round((((100 + bottom) * 2) / 3) * (box.offsetWidth / 100));
+  box.style.height = `${height}px`;
+  box.style.top = `${bottom - height}px`;
+  // pasta das fotos escolhida no painel, servida em /overlay/avatars/
+  const src = `avatars/${encodeURIComponent(file)}?v=${encodeURIComponent(avatarVersion)}`;
+  if (img.dataset.file === src) return;
+  img.dataset.file = src;
+  img.onerror = () => card.classList.remove("has-photo"); // arquivo sumiu ou nao abre
+  img.src = src;
 }
 
 function rltTeamName(entry) {
@@ -102,39 +142,20 @@ function rltTeamFullName(entry) {
   return (info && info.teamFullName) || rltTeamName(entry);
 }
 
-const POS_DEFAULT_BG = "";
-
-// Coluna da posicao: degrade da cor primaria para a secundaria da equipe.
-// Cada numero recebe preto ou branco conforme a cor do degrade na altura em
-// que ele esta, mais um contorno na cor oposta, para nunca sumir no fundo.
-function paintPositionColumn(entry) {
-  const col = document.querySelector(".pos-col");
-  if (!col) return;
+// Bloco do logo, embaixo da posicao: na cor principal da equipe (RLT). Devolve
+// a variante do logo para esse fundo, como na pagina de disputas da tabela:
+// "light" (logo claro) em fundo escuro, "dark" (logo escuro) em fundo claro.
+// Sem equipe no RLT: azul padrao do CSS e o logo normal.
+function paintLogoBox(entry) {
+  const box = document.getElementById("logoBox");
   const info = rltLookup(entry);
-  const a = info && LLGColors.toRgb(info.teamPrimaryColor);
-  const b = (info && LLGColors.toRgb(info.teamSecondaryColor)) || a;
-  const targets = [
-    [document.getElementById("posClass"), 0.4],
-    [document.getElementById("posOverall"), 0.72],
-  ];
-  if (!a) {
-    // sem equipe no RLT: volta para o azul padrao do CSS
-    col.style.background = POS_DEFAULT_BG;
-    targets.forEach(([el]) => {
-      if (!el) return;
-      el.style.color = "";
-      el.style.textShadow = "";
-    });
-    return;
+  const rgb = info && LLGColors.toRgb(info.teamPrimaryColor);
+  if (!rgb) {
+    box.style.removeProperty("--team-bg");
+    return null;
   }
-  col.style.background = `linear-gradient(180deg, rgb(${a.join(",")}) 0%, rgb(${b.join(",")}) 100%)`;
-  targets.forEach(([el, at]) => {
-    if (!el) return;
-    const fg = LLGColors.readableOn(LLGColors.mix(a, b, at));
-    const outline = fg === "#000000" ? "rgba(255,255,255,0.85)" : "rgba(0,0,0,0.85)";
-    el.style.color = fg;
-    el.style.textShadow = `0 0 2px ${outline}, 0 0 2px ${outline}, 0 0 4px ${outline}`;
-  });
+  box.style.setProperty("--team-bg", `rgb(${rgb.join(",")})`);
+  return LLGColors.readableOn(rgb) === "#ffffff" ? "light" : "dark";
 }
 
 // Nome da classe, igual ao cabecalho da tabela: classe do RLT quando ha
@@ -343,10 +364,10 @@ function renderNow() {
   const team = rltTeamName(entry);
   document.getElementById("driverName").textContent = rltDisplayName(entry) || entry.name || "—";
   document.getElementById("teamName").textContent = rltTeamFullName(entry) || "—";
-  paintPositionColumn(entry);
   document.getElementById("raceNum").textContent = rltRaceNumber(entry);
 
-  setBgLogo(document.getElementById("bgLogo"), team, entry.carName);
+  setBgLogo(document.getElementById("bgLogo"), team, entry.carName, paintLogoBox(entry));
+  setPhoto(entry);
 
   const stats = document.getElementById("stats");
   // pagina de disputas da tabela: barra dos pedais, marcha e velocidade
@@ -458,6 +479,10 @@ function connect() {
         render();
       } else if (msg.type === "assetsConfig") {
         logoLoader.setConfig(msg.data || {});
+        render();
+      } else if (msg.type === "avatars") {
+        avatarIndex = LLGAvatars.createIndex((msg.data && msg.data.files) || []);
+        avatarVersion = (msg.data && msg.data.version) || "";
         render();
       } else if (msg.type === "overlayCommand") {
         const name = msg.name;

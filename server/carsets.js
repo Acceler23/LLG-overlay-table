@@ -143,6 +143,63 @@ function setAsideOld(dest) {
   return renamed;
 }
 
+// ---- pinturas antigas ("_old_") ----
+// Os "_old_" ficam dentro da pasta de cada carro, em Overrides<carro>_old_...
+// So itens com esse comeco de nome, e so nesse nivel, sao listados e apagados;
+// atalhos (links) sao ignorados.
+function sizeOf(p) {
+  let total = 0;
+  const st = fs.lstatSync(p);
+  if (st.isSymbolicLink()) return 0;
+  if (st.isFile()) return st.size;
+  if (st.isDirectory()) fs.readdirSync(p).forEach((n) => (total += sizeOf(path.join(p, n))));
+  return total;
+}
+
+function findOld(gameDir) {
+  const target = overridesDir(gameDir);
+  if (!fs.existsSync(target)) throw new Error(`Pasta de pinturas do jogo nao encontrada: ${target}`);
+  const items = [];
+  fs.readdirSync(target, { withFileTypes: true }).forEach((car) => {
+    if (!car.isDirectory() || car.isSymbolicLink()) return;
+    let entries = [];
+    try {
+      entries = fs.readdirSync(path.join(target, car.name), { withFileTypes: true });
+    } catch (_) {
+      return;
+    }
+    entries.forEach((e) => {
+      if (!e.name.startsWith(OLD_PREFIX) || e.isSymbolicLink()) return;
+      const full = path.join(target, car.name, e.name);
+      items.push({ car: car.name, name: e.name, path: full, bytes: sizeOf(full) });
+    });
+  });
+  return items;
+}
+
+// Resumo para o painel: { count, bytes, cars }
+function listOld(gameDir) {
+  const items = findOld(gameDir);
+  return { count: items.length, bytes: items.reduce((s, i) => s + i.bytes, 0), cars: new Set(items.map((i) => i.car)).size };
+}
+
+// Apaga todos os "_old_". Devolve { deleted, bytes, failed }.
+function deleteOld(gameDir) {
+  let deleted = 0;
+  let bytes = 0;
+  const failed = [];
+  findOld(gameDir).forEach((item) => {
+    try {
+      fs.rmSync(item.path, { recursive: true, force: true });
+      deleted++;
+      bytes += item.bytes;
+    } catch (err) {
+      failed.push(`${path.join(item.car, item.name)}: ${err.message}`);
+    }
+  });
+  return { deleted, bytes, failed };
+}
+
 // Aplica a pasta de um carro (src, do carset) na pasta do jogo (dest).
 // Devolve { renamed, copied, skipped }.
 function applyCar(src, dest, mode) {
@@ -286,4 +343,4 @@ async function install(options) {
   }
 }
 
-module.exports = { LIST_FILE, MODES, OLD_PREFIX, parseList, downloadUrl, overridesDir, findCarDirs, applyCar, installExtracted, archiveKind, isGameRunning, install, status };
+module.exports = { listOld, deleteOld, LIST_FILE, MODES, OLD_PREFIX, parseList, downloadUrl, overridesDir, findCarDirs, applyCar, installExtracted, archiveKind, isGameRunning, install, status };

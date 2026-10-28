@@ -7,9 +7,13 @@
 </head>
 <body>
   <div id="card" class="hidden">
+    <!-- coluna da esquerda: posicao em cima, logo da equipe embaixo (na cor da equipe) -->
     <div class="pos-col">
-      <span class="pos-num" id="posClass">—</span>
-      <span class="pos-overall" id="posOverall">—</span>
+      <div class="pos-box">
+        <span class="pos-num" id="posClass">—</span>
+        <span class="pos-overall" id="posOverall">—</span>
+      </div>
+      <div class="logo-box" id="logoBox"><img class="team-logo" id="bgLogo" alt="" /></div>
     </div>
     <div class="main">
       <div class="class-bar" id="classBar">
@@ -21,12 +25,15 @@
           <div class="driver" id="driverName"></div>
           <div class="team" id="teamName"></div>
         </div>
-        <img class="team-logo" id="bgLogo" alt="" />
       </div>
       <div class="stats" id="stats"></div>
     </div>
+    <!-- foto do piloto (pasta das fotos, painel), se houver: a direita do nome,
+         saindo do cartao para cima -->
+    <div class="photo" id="photoBox"><img id="photo" alt="" /></div>
   </div>
   <script src="shared/names.js"></script>
+  <script src="shared/avatars.js"></script>
   <script src="shared/colors.js"></script>
   <script src="shared/logos.js"></script>
   <script src="shared/groups.js"></script>

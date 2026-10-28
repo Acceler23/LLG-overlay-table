@@ -173,3 +173,35 @@ test("tipo do arquivo pelos primeiros bytes", () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("pinturas antigas: so os _old_ dentro das pastas dos carros sao contados e apagados", () => {
+  const game = fs.mkdtempSync(path.join(os.tmpdir(), "llg-old-"));
+  try {
+    const ov = carsets.overridesDir(game);
+    const put = (rel, text) => {
+      fs.mkdirSync(path.dirname(path.join(ov, rel)), { recursive: true });
+      fs.writeFileSync(path.join(ov, rel), text);
+    };
+    put("porsche_992_gt3_r/_old_lets_go/car.dds", "12345");
+    put("porsche_992_gt3_r/_old_team.dds", "123");
+    put("porsche_992_gt3_r/lets_go/car.dds", "novo");
+    put("porsche_992_gt3_r/porsche_992_gt3_r_dist.xml", "<dist/>");
+    put("mclaren_720s_gt3/_old_x/livery.dds", "1");
+    put("mclaren_720s_gt3/x/livery.dds", "2");
+    put("_old_pasta_na_raiz/coisa.dds", "nao mexe"); // fora de uma pasta de carro
+    put("mclaren_720s_gt3/sub/_old_fundo.dds", "nao mexe"); // mais fundo que a pasta do carro
+
+    assert.deepEqual(carsets.listOld(game), { count: 3, bytes: 9, cars: 2 });
+    const r = carsets.deleteOld(game);
+    assert.equal(r.deleted, 3);
+    assert.equal(r.bytes, 9);
+    assert.deepEqual(r.failed, []);
+    assert.deepEqual(carsets.listOld(game), { count: 0, bytes: 0, cars: 0 });
+    // o resto continua la
+    ["porsche_992_gt3_r/lets_go/car.dds", "porsche_992_gt3_r/porsche_992_gt3_r_dist.xml", "mclaren_720s_gt3/x/livery.dds", "_old_pasta_na_raiz/coisa.dds", "mclaren_720s_gt3/sub/_old_fundo.dds"].forEach((rel) =>
+      assert.ok(fs.existsSync(path.join(ov, rel)), rel)
+    );
+  } finally {
+    fs.rmSync(game, { recursive: true, force: true });
+  }
+});

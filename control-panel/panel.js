@@ -227,6 +227,53 @@ async function installCarset() {
 
 loadCarsets();
 
+// Pinturas antigas ("_old_") do AMS2: verificar e apagar de vez (com aviso)
+let oldInfo = null;
+const mb = (bytes) => (bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`);
+
+function showOld(info) {
+  oldInfo = info;
+  const btn = document.getElementById("oldDeleteBtn");
+  const el = document.getElementById("oldStatus");
+  btn.disabled = !(info && info.count > 0);
+  if (!info) return;
+  el.textContent = info.count
+    ? `${info.count} ${info.count === 1 ? "item antigo" : "itens antigos"} em ${info.cars} ${info.cars === 1 ? "carro" : "carros"}, ocupando ${mb(info.bytes)}.${info.gameRunning ? " Feche o Automobilista 2 para apagar." : ""}`
+    : "Nenhuma pintura antiga (_old_) na pasta do jogo.";
+}
+
+async function checkOldLiveries() {
+  document.getElementById("oldStatus").textContent = "Verificando...";
+  try {
+    showOld(await api("/api/carsets/old"));
+  } catch (e) {
+    document.getElementById("oldStatus").textContent = "Erro: " + e.message;
+  }
+}
+
+async function deleteOldLiveries() {
+  if (!oldInfo || !oldInfo.count) return;
+  const ok = window.confirm(
+    `Apagar de vez ${oldInfo.count} ${oldInfo.count === 1 ? "pintura antiga" : "pinturas antigas"} (_old_), ${mb(oldInfo.bytes)}?\n\n` +
+      "Elas são apagadas da pasta do Automobilista 2 e NÃO vão para a Lixeira: não dá para desfazer.\n" +
+      "As pinturas atuais e os arquivos _dist.xml não são tocados."
+  );
+  if (!ok) return;
+  const btn = document.getElementById("oldDeleteBtn");
+  btn.disabled = true;
+  document.getElementById("oldStatus").textContent = "Apagando...";
+  try {
+    const r = await api("/api/carsets/old/delete", { method: "POST", body: JSON.stringify({ confirm: true }) });
+    showOld(r);
+    document.getElementById("oldStatus").textContent =
+      `Apagados ${r.deleted} ${r.deleted === 1 ? "item" : "itens"} (${mb(r.bytes)}).` + (r.failed && r.failed.length ? ` Não foi possível apagar: ${r.failed.join("; ")}` : "");
+    log(`Pinturas antigas apagadas: ${r.deleted}`);
+  } catch (e) {
+    document.getElementById("oldStatus").textContent = "Erro: " + e.message;
+    btn.disabled = false;
+  }
+}
+
 // ---------------------------------------------------------------- ACC
 // Tempo maximo de stint: o servidor guarda a escolha e manda para a tabela.
 function showAccStint(body) {
@@ -282,6 +329,35 @@ function setBattleScope(value) {
   } catch (_) {}
   send("overlay.setBattleScope", { value });
 }
+
+// ---------------------------------------------------------------- fotos dos pilotos
+// Pasta local das fotos do driver card (server/avatars.js)
+function showAvatars(body) {
+  document.getElementById("avatarsPath").value = body.path || "";
+  document.getElementById("avatarsStatus").textContent = !body.exists
+    ? "Pasta não encontrada."
+    : `${body.count} ${body.count === 1 ? "foto" : "fotos"} na pasta${body.isDefault ? " (pasta padrão)" : ""}.`;
+}
+
+async function saveAvatarsPath(useDefault) {
+  try {
+    const p = useDefault ? "" : document.getElementById("avatarsPath").value.trim();
+    showAvatars(await api("/api/avatars/path", { method: "POST", body: JSON.stringify({ path: p }) }));
+    log("Pasta das fotos dos pilotos salva");
+  } catch (e) {
+    document.getElementById("avatarsStatus").textContent = "Erro: " + e.message;
+  }
+}
+
+async function openAvatarsFolder() {
+  try {
+    await api("/api/avatars/open", { method: "POST", body: "{}" });
+  } catch (e) {
+    document.getElementById("avatarsStatus").textContent = "Erro: " + e.message;
+  }
+}
+
+api("/api/avatars").then(showAvatars).catch(() => {});
 
 // ---------------------------------------------------------------- rede local
 // Overlays em outros aparelhos da mesma rede: link e QR code do mini painel
