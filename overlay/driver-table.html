@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>Tabela do Piloto</title>
+  <link rel="stylesheet" href="shared/racecontrol.css" />
   <link rel="stylesheet" href="driver-table.css" />
 </head>
 <body>
@@ -11,10 +12,15 @@
       <span id="dtSession">—</span>
       <span id="dtTimer"></span>
     </div>
+    <div id="rcTag" hidden><div class="rct-body" id="rcTagText"></div></div>
     <div id="dtClasses"></div>
     <div id="dtPoints"></div>
   </div>
 
+  <!-- safety car / FCY: cobre a tabela por alguns segundos (fora dela, que corta o que passa) -->
+  <div id="rcPanel" hidden><div class="rcp-body" id="rcPanelText"></div></div>
+
+  <script src="shared/racecontrol.js"></script>
   <script src="shared/names.js"></script>
   <script src="shared/gaps.js"></script>
   <script src="shared/colors.js"></script>

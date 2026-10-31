@@ -41,3 +41,10 @@ test("nome repetido (caractere invisivel no fim) ainda bate", () => {
   mergeIdentity(standings, indexStandings(api));
   assert.equal(standings[0].carNumber, "97");
 });
+
+test("nome com o codigo da conta do online: a troca de numero e equipe continua valendo", () => {
+  const standings = [{ slot: 5, name: "Felipe Antunes", carNumber: "397", teamName: "Custom Team" }];
+  mergeIdentity(standings, indexStandings([{ slotID: 5, driverName: "Felipe Antunes#1005", carNumber: "10", fullTeamName: "Racing Spirit of Léman" }]));
+  assert.equal(standings[0].carNumber, "10");
+  assert.equal(standings[0].teamName, "Racing Spirit of Léman");
+});

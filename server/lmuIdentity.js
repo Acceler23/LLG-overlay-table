@@ -21,6 +21,9 @@ let fetchedAt = 0;
 let busy = false;
 
 const clean = (s) => String(s == null ? "" : s).trim();
+// nome para comparar: sem os caracteres invisiveis de nomes repetidos e sem o
+// codigo da conta do online do LMU ("Felipe Antunes#1005")
+const baseName = (s) => clean(s).replace(/​+$/, "").replace(/\s*#\d+\s*$/, "");
 
 // Lista da API -> mapa por slot (so com o que tiver numero ou equipe)
 function indexStandings(list) {
@@ -42,7 +45,7 @@ function mergeIdentity(standings, map) {
   (standings || []).forEach((e) => {
     const info = map.get(e.slot);
     if (!info) return;
-    if (info.driverName && clean(e.name).replace(/​+$/, "") !== info.driverName) return;
+    if (info.driverName && baseName(e.name) !== baseName(info.driverName)) return;
     if (info.carNumber) e.carNumber = info.carNumber;
     if (info.teamName) e.teamName = info.teamName;
   });

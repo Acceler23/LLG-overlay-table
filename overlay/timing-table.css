@@ -29,6 +29,48 @@ html, body {
   border-radius: 0;
 }
 
+/* ---- clima no rodape da tabela (32 px: FOOTER_H em timing-table.js) ---- */
+.weather-bar {
+  display: flex;
+  gap: 2px;
+  height: 32px;
+  background-color: #0a2d52;
+  border-top: 2px solid #00c5fd;
+}
+
+.weather-bar[hidden] { display: none; }
+
+.wb {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.wb-icon {
+  height: 20px;
+  width: auto;
+  max-width: 26px;
+  object-fit: contain;
+}
+
+/* com o icone, o nome sai */
+.wb.has-icon .wb-l { display: none; }
+
+.wb-l {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  opacity: 0.8;
+}
+
+.wb-v {
+  font-size: 16px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
 #rows {
   display: flex;
   flex-direction: column;
@@ -36,13 +78,12 @@ html, body {
   padding-bottom: 3px;
 }
 
-#timing-table.sc-out {
-  background-color: rgba(230, 184, 0, var(--table-opacity));
-}
+/* safety car / FCY: animacao em shared/racecontrol.css. Aqui, a etiqueta fica ao lado da pista */
+#rcPanel, #rcTag { position: absolute; }
 
-#timing-table.sc-out .title-bar,
-#timing-table.sc-out .header {
-  background-color: #c49a00;
+/* com a etiqueta ao lado, a da pista perde o canto arredondado */
+#trackTag.rc-joined {
+  border-radius: 0;
 }
 
 /* ---- cabecalho, no estilo do GT World Challenge, nos tons de azul da tabela ----
@@ -433,6 +474,22 @@ html, body {
 
 .sectors i.sec-red {
   background: #ff3b3b;
+}
+
+.pen-badge {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: #ff3b3b;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.pen-badge[hidden] {
+  display: none;
 }
 
 .pit-badge {

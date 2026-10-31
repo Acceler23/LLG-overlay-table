@@ -14,6 +14,7 @@
   // grudados com maiuscula no meio ("LeonardoBorges" -> "leonardo borges").
   function normalizeName(name) {
     return String(name || "")
+      .replace(/\s*#\d+\s*$/, "") // codigo da conta no online do LMU: "Felipe Antunes#1005"
       .replace(/\[[^\]]*\]/g, "")
       .replace(/\([^)]*\)/g, "")
       .replace(/([a-zà-ÿ])([A-ZÀ-Þ])/g, "$1 $2")

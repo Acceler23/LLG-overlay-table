@@ -247,3 +247,27 @@ test("numero da volta mais rapida: registrado quando a ultima volta e a melhor",
   // sem melhor volta ainda
   assert.equal(rs.apply(p(0, 0, 0)).standings[0].fastestLapNum, null);
 });
+
+test("corrida por tempo: voltas que faltam depois do relogio zerar", () => {
+  const clock = { t: 0 };
+  const rs = createRaceState(() => clock.t);
+  const frame = (remaining, laps, extra) => {
+    clock.t += 500;
+    return rs.apply({
+      session: { state: 5, trackLocation: "X", trackLength: 3000, lapsInEvent: 0, timeRemainingSec: remaining, additionalLaps: extra },
+      standings: [{ name: "A", position: 1, pitMode: 0, raceState: 2, speedMs: 50, lapsCompleted: laps, currentLap: laps + 1 }],
+    }).session.lapsLeft;
+  };
+  assert.equal(frame(30, 10, 1), null); // ainda tem tempo: mostra o relogio
+  assert.equal(frame(0, 10, 1), 2); // zerou na volta 11: termina a 11 e faz mais 1
+  assert.equal(frame(-5, 10, 1), 2);
+  assert.equal(frame(-60, 11, 1), 1); // ultima volta
+  // sem voltas extras (outros jogos): so termina a volta em que estava
+  const rs2 = createRaceState(() => clock.t);
+  clock.t += 500;
+  const s = rs2.apply({ session: { state: 5, trackLocation: "Y", lapsInEvent: 0, timeRemainingSec: 0 }, standings: [{ name: "A", position: 1, pitMode: 0, raceState: 2, speedMs: 50, lapsCompleted: 7 }] }).session;
+  assert.equal(s.lapsLeft, 1);
+  // corrida por voltas: nunca
+  clock.t += 500;
+  assert.equal(rs2.apply({ session: { state: 5, trackLocation: "Z", lapsInEvent: 20, timeRemainingSec: 0 }, standings: [] }).session.lapsLeft, null);
+});

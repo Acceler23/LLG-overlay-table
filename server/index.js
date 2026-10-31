@@ -26,6 +26,8 @@ const carsets = require("./carsets");
 const secret = require("./secret");
 const { compactTracks, compactMultiseasons } = require("./trackStats");
 const { createSessionLog } = require("./sessionLog");
+const { createTrackMap } = require("./trackMap");
+const { createRaceControl } = require("./raceControl");
 
 // Chave do RLT: a do .env tem prioridade; senao, a ultima salva pelo painel.
 // (ler sempre: uma chave antiga, salva em texto puro, e regravada criptografada)
@@ -466,6 +468,7 @@ wss.onConnect((socket) => {
   if (socket.readyState === 1) {
     socket.send(JSON.stringify({ type: "assetsConfig", data: assetsConfigPayload() }));
     socket.send(JSON.stringify(avatarsPayload()));
+    socket.send(JSON.stringify({ type: "trackMap", data: trackMap.get() }));
   }
   if (socket.readyState === 1) socket.send(JSON.stringify(sessionLogPayload()));
   if (socket.readyState === 1 && trackStats.tracks.length) {
@@ -586,6 +589,60 @@ app.post("/api/carsets/install", async (req, res) => {
   }
 });
 
+// ---- direcao de prova no LMU (aba LMU do painel, com senha) ----
+// FCY: mensagem no chat do jogo + aviso nas tabelas (session.fcy)
+const raceControl = createRaceControl(settings, { pollChat: true }); // pollChat: segue o FCY mandado no chat por outro PC
+const lmuToken = (req) => req.get("x-llg-token") || "";
+const lmuReply = (res, out) => res.status(out.ok ? 200 : 403).json(out);
+
+app.get("/api/lmu/control", (req, res) => {
+  const st = raceControl.status();
+  // bloqueado: sem as mensagens
+  res.json(raceControl.allowed(lmuToken(req)) ? Object.assign(st, { unlocked: true }) : { ok: true, fcy: st.fcy, fcyBy: st.fcyBy, sc: st.sc, scBy: st.scBy, follow: st.follow, unlocked: false });
+});
+// seguir o FCY e o SC do chat: sem senha (so le o chat, nao manda nada)
+app.post("/api/lmu/follow", (req, res) => res.json({ ok: true, follow: raceControl.setFollow(req.body).follow }));
+app.post("/api/lmu/unlock", (req, res) => lmuReply(res, raceControl.unlock(req.body && req.body.password)));
+app.post("/api/lmu/lock", (req, res) => res.json(raceControl.lock(lmuToken(req))));
+app.post("/api/lmu/messages", (req, res) => lmuReply(res, raceControl.setMessages(lmuToken(req), req.body)));
+app.post("/api/lmu/sc", async (req, res) => {
+  try {
+    lmuReply(res, await raceControl.setSc(lmuToken(req), !!(req.body && req.body.on)));
+  } catch (err) {
+    res.status(502).json({ ok: false, error: "Não foi possível mandar a mensagem no LMU (o jogo está aberto?): " + err.message });
+  }
+});
+const lmuGameError = (res, err) => res.status(502).json({ ok: false, error: "O LMU não respondeu (o jogo está aberto?): " + err.message });
+app.post("/api/lmu/replay", async (req, res) => {
+  try {
+    lmuReply(res, await raceControl.replayJump(lmuToken(req), req.body && req.body.et));
+  } catch (err) {
+    lmuGameError(res, err);
+  }
+});
+app.post("/api/lmu/replay/exit", async (req, res) => {
+  try {
+    lmuReply(res, await raceControl.replayExit(lmuToken(req)));
+  } catch (err) {
+    lmuGameError(res, err);
+  }
+});
+app.post("/api/lmu/sc/car", (req, res) => lmuReply(res, raceControl.setScCar(lmuToken(req), req.body && req.body.name)));
+app.post("/api/lmu/sc/waveby", async (req, res) => {
+  try {
+    lmuReply(res, await raceControl.waveBy(lmuToken(req)));
+  } catch (err) {
+    res.status(502).json({ ok: false, error: "Não foi possível mandar a mensagem no LMU (o jogo está aberto?): " + err.message });
+  }
+});
+app.post("/api/lmu/fcy", async (req, res) => {
+  try {
+    lmuReply(res, await raceControl.setFcy(lmuToken(req), !!(req.body && req.body.on)));
+  } catch (err) {
+    res.status(502).json({ ok: false, error: "Não foi possível mandar a mensagem no LMU (o jogo está aberto?): " + err.message });
+  }
+});
+
 app.post("/command", (req, res) => {
   const name = req.body && req.body.name;
   if (!name) return res.status(400).json({ ok: false });
@@ -639,6 +696,25 @@ app.post("/api/assets/path", (req, res) => {
   } catch (e) {
     res.status(500).json({ ok: false, error: e.message });
   }
+});
+
+// ---- mapa da pista (server/trackMap.js) ----
+// Aprendido com as posicoes dos carros e salvo em trackmaps.json, na pasta de
+// dados (fora da pasta do aplicativo, que e trocada nas atualizacoes).
+const trackMap = createTrackMap({
+  file: path.join(process.env.LLG_DATA_DIR || path.join(__dirname, ".."), "trackmaps.json"),
+  onChange: (map) => wss.broadcast({ type: "trackMap", data: map }),
+});
+
+app.get("/api/trackmap", (req, res) => {
+  const m = trackMap.get();
+  res.json({ ok: true, map: m ? { key: m.key, ready: m.ready, coverage: m.coverage, saved: m.saved } : null });
+});
+
+// apaga o mapa salvo da pista atual e aprende de novo (pista alterada, mapa ruim)
+app.post("/api/trackmap/forget", (req, res) => {
+  trackMap.forget();
+  res.json({ ok: true });
 });
 
 // ---- pasta das fotos dos pilotos (painel, aba Transmissao) ----
@@ -862,9 +938,11 @@ function handleGamePayload(payload) {
     lmuFocus.apply(payload);
     lmuIdentity.apply(payload); // numero e equipe das pinturas nao oficiais (API local do jogo)
   }
+  raceControl.apply(payload); // FCY ligado pelo painel (so no LMU)
   const data = raceState.apply(payload);
   noteSessionNames(data && data.standings);
   if (data && sessionLog.apply(data)) wss.broadcast(sessionLogPayload());
+  if (data) trackMap.apply(data.game, data); // aprende o mapa da pista (overlay/track-map.html)
   // ACC: limite de stint escolhido no painel (0 = sem limite)
   if (data && data.game === "acc" && data.session) data.session.stintLimitMin = accStintLimitMin;
   wss.broadcast({ type: "standings", data });

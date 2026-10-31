@@ -1,0 +1,92 @@
+/* Mapa da pista com os carros (o clima fica no rodape da tabela de tempos).
+   Mesmas cores das outras overlays.
+   Desenhado para 420 px de largura; track-map.js aplica zoom para acompanhar
+   a largura da janela/fonte. */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: transparent;
+  font-family: "Segoe UI", Arial, sans-serif;
+  color: #fff;
+  overflow: hidden;
+}
+
+#tm {
+  position: relative;
+  width: 420px;
+  /* opacidade do fundo: slider do painel (Transmissao > Aparencia) */
+  background-color: rgba(14, 58, 102, var(--map-alpha, 1));
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+#tm.hidden { display: none; }
+
+/* aviso enquanto o mapa e aprendido, no canto de cima do mapa */
+.tm-status {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  opacity: 0.85;
+}
+
+.tm-status:empty { display: none; }
+
+.tm-map {
+  display: block;
+  width: 420px;
+  height: 400px;
+}
+
+/* tracado: contorno escuro por baixo e a linha clara por cima */
+.tm-outline {
+  fill: none;
+  stroke: #0a2d52;
+  stroke-width: 16;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.tm-line {
+  fill: none;
+  stroke: #cfe6ff;
+  stroke-width: 8;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+/* bandeira amarela: o trecho fica amarelo; safety car / amarela geral: a pista toda */
+.tm-yellow {
+  fill: none;
+  stroke: #ffd21f;
+  stroke-width: 8;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+#tm.sc-out .tm-line { stroke: #ffd21f; }
+
+.tm-start {
+  stroke: #ff3b3b;
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+
+/* carros: circulo na cor da classe com a posicao na classe; o piloto em foco maior */
+.tm-car { transition: transform 0.15s linear; }
+.tm-car circle { stroke: #0a2d52; stroke-width: 2; }
+.tm-car text {
+  font-size: 13px;
+  font-weight: 800;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+.tm-car.focus circle { stroke: #fff; stroke-width: 3; }
+.tm-car.focus text { font-size: 16px; }
+/* lider de cada classe: anel dourado */
+.tm-car .ring { fill: none; stroke: #ffd21f; stroke-width: 3; display: none; }
+.tm-car.leader .ring { display: inline; }
+.tm-car.pit { opacity: 0.45; }

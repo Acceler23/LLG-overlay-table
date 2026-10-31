@@ -176,3 +176,22 @@ test("logo da equipe: painel, nome exato, trecho com * e por fim o nome", () => 
   assert.equal(display.teamLogoFile("Hell Machine", {}), "hell_machine.png");
   assert.equal(display.teamLogoFile("BMW M Team WRT", { "BMW M Team WRT": "outro.png" }), "outro.png"); // o painel vence
 });
+
+test("nome da pista colado do AMS2: separa as palavras, tira o ano e nao repete o tracado", () => {
+  display.setConfig({ trackNames: {} });
+  assert.deepEqual(display.trackDisplay("SpaFrancorchamps", "Spa_Francorchamps_2022"), { name: "Spa Francorchamps", layout: "" });
+  assert.deepEqual(display.trackDisplay("CampoGrande", "CampoGrande"), { name: "Campo Grande", layout: "" });
+  assert.deepEqual(display.trackDisplay("Nurburgring", "Nordschleife_2020"), { name: "Nurburgring", layout: "Nordschleife" });
+  assert.deepEqual(display.trackDisplay("Interlagos", "GP"), { name: "Interlagos", layout: "GP" });
+  assert.deepEqual(display.trackDisplay("Interlagos", "Interlagos_GP"), { name: "Interlagos", layout: "GP" });
+});
+
+test("penaltyLabel: DT e SG no AMS2, PEN com a quantidade no LMU, vazio sem punicao", () => {
+  assert.equal(display.penaltyLabel({ penaltyType: "driveThrough", penalties: 1 }), "DT");
+  assert.equal(display.penaltyLabel({ penaltyType: "stopGo" }), "SG");
+  assert.equal(display.penaltyLabel({ penalties: 1 }), "PEN");
+  assert.equal(display.penaltyLabel({ penalties: 3 }), "PEN x3");
+  assert.equal(display.penaltyLabel({ penalties: 0 }), "");
+  assert.equal(display.penaltyLabel({ penaltyType: "desconhecido" }), "");
+  assert.equal(display.penaltyLabel(null), "");
+});

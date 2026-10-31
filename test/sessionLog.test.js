@@ -244,3 +244,34 @@ test("corrida: sem aviso de melhor volta nas voltas 1 e 2", () => {
   frame(4, 90000, 90500); // volta 4: A faz a melhor da corrida
   assert.deepEqual(log.getEvents().map((e) => `${e.driver} ${e.scope} ${e.lap}`), ["A personal 3", "A overall 4"]);
 });
+
+test("FCY: inicio, infracoes (com o tempo acima e apos a contagem) e fim, nessa ordem", () => {
+  let t = 0;
+  const log = createSessionLog({ clock: () => t });
+  const car = { name: "A", position: 1, lapsCompleted: 3, currentLap: 4, speedMs: 50, raceState: 2 };
+  const tick = (ms, session) => {
+    t += ms;
+    log.apply({ session: Object.assign({ state: 5, trackLocation: "Spa" }, session), standings: [Object.assign({}, car)] });
+  };
+  tick(0, { fcy: false });
+  tick(1000, { fcy: true });
+  tick(1000, { fcy: false, fcyBreaches: [{ name: "A", overMs: 3200, afterMs: 4100, maxKmh: 112.4 }] });
+  const ev = log.getEvents().map((e) => (e.type === "fcyBreach" ? `${e.type} ${e.driver} ${e.overMs} ${e.afterMs} ${e.maxKmh}` : e.type));
+  assert.deepEqual(ev, ["fcy", "fcyBreach A 3200 4100 112", "green"]);
+});
+
+test("FCY virando safety car (e o contrario): sem bandeira verde no meio", () => {
+  let t = 0;
+  const log = createSessionLog({ clock: () => t });
+  const car = { name: "A", position: 1, lapsCompleted: 3, currentLap: 4, speedMs: 50, raceState: 2 };
+  const tick = (session) => {
+    t += 1000;
+    log.apply({ session: Object.assign({ state: 5, trackLocation: "Spa" }, session), standings: [Object.assign({}, car)] });
+  };
+  tick({ fcy: false, scOut: false });
+  tick({ fcy: true, scOut: false });
+  tick({ fcy: false, scOut: true });
+  tick({ fcy: true, scOut: false });
+  tick({ fcy: false, scOut: false });
+  assert.deepEqual(log.getEvents().map((e) => e.type), ["fcy", "safetyCar", "fcy", "green"]);
+});

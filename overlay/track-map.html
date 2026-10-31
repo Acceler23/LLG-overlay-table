@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <title>Mapa da Pista</title>
+  <link rel="stylesheet" href="track-map.css" />
+</head>
+<body>
+  <div id="tm" class="hidden">
+    <!-- so aparece enquanto o mapa da pista esta sendo aprendido -->
+    <div id="tmStatus" class="tm-status"></div>
+    <svg id="tmSvg" class="tm-map" xmlns="http://www.w3.org/2000/svg">
+      <polyline id="tmOutline" class="tm-outline" />
+      <polyline id="tmLine" class="tm-line" />
+      <!-- trechos sob bandeira amarela (AMS2: os mini-setores com carro de bandeira amarela) -->
+      <g id="tmYellow"></g>
+      <line id="tmStart" class="tm-start" />
+      <g id="tmCars"></g>
+    </svg>
+  </div>
+
+  <script src="shared/names.js"></script>
+  <script src="shared/colors.js"></script>
+  <script src="shared/logos.js"></script>
+  <script src="shared/groups.js"></script>
+  <script src="shared/framecap.js"></script>
+  <script src="shared/display.js"></script>
+  <script src="drivers-config.js"></script>
+  <script src="track-names.js"></script>
+  <script src="track-map.js"></script>
+</body>
+</html>

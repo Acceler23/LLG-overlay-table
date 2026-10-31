@@ -34,6 +34,13 @@ $bridgePort = $BridgePort
 
 # Offsets (em bytes) dentro da Shared Memory:
 $OFFSET_SEQUENCE_NUMBER          = 7320  # uint, impar enquanto o jogo esta escrevendo
+# clima (logo antes do numero de sequencia)
+$OFFSET_AMBIENT_TEMP             = 7292  # float, graus Celsius
+$OFFSET_TRACK_TEMP               = 7296  # float, graus Celsius
+$OFFSET_RAIN_DENSITY             = 7300  # float, 0 a 1
+# sessao (AMS2): duracao programada e voltas extras depois do tempo acabar
+$OFFSET_SESSION_DURATION         = 20576 # float, minutos (0 = corrida por voltas)
+$OFFSET_SESSION_ADDITIONAL_LAPS  = 20580 # int
 $OFFSET_SESSION_STATE            = 12
 $OFFSET_VIEWED_PARTICIPANT_INDEX = 20
 $OFFSET_NUM_PARTICIPANTS         = 24
@@ -412,6 +419,9 @@ while ($true) {
 
                     $name = Read-CString $buf ($base + 1) 64
                     $currentLapDistance = [BitConverter]::ToSingle($buf, $base + 80)
+                    # posicao no mundo (X e Z; o Y e a altura), para o mapa da pista
+                    $worldX = [BitConverter]::ToSingle($buf, $base + 68)
+                    $worldZ = [BitConverter]::ToSingle($buf, $base + 76)
                     $lapsCompleted = [BitConverter]::ToUInt32($buf, $base + 88)
                     $currentLap = [BitConverter]::ToUInt32($buf, $base + 92)
                     $currentSector = [BitConverter]::ToInt32($buf, $base + 96)
@@ -448,6 +458,9 @@ while ($true) {
                         carClass      = $carClass
                         lapsCompleted = [int]$lapsCompleted
                         currentLap    = [int]$currentLap
+                        lapDistance   = [math]::Round([double]$currentLapDistance, 1)
+                        worldX        = [math]::Round([double]$worldX, 1)
+                        worldZ        = [math]::Round([double]$worldZ, 1)
                         totalDistance = ([double]$lapsCompleted * $trackLength) + $currentLapDistance
                         lastLapMs     = if ($lastLap -gt 0) { [int]($lastLap * 1000) } else { $null }
                         fastestLapMs  = if ($fastestLap -gt 0) { [int]($fastestLap * 1000) } else { $null }
@@ -588,6 +601,11 @@ while ($true) {
                         trackLocation    = $trackLocation
                         trackVariation   = $trackVariation
                         trackLength      = [math]::Round([double]$trackLength, 1)
+                        ambientTempC     = [math]::Round([double][BitConverter]::ToSingle($buf, $OFFSET_AMBIENT_TEMP), 1)
+                        trackTempC       = [math]::Round([double][BitConverter]::ToSingle($buf, $OFFSET_TRACK_TEMP), 1)
+                        rain             = [math]::Round([double][BitConverter]::ToSingle($buf, $OFFSET_RAIN_DENSITY), 2)
+                        sessionDurationMin = [math]::Round([double][BitConverter]::ToSingle($buf, $OFFSET_SESSION_DURATION), 1)
+                        additionalLaps   = [int][BitConverter]::ToInt32($buf, $OFFSET_SESSION_ADDITIONAL_LAPS)
                     }
                     standings = $standingsSorted
                     car       = $car

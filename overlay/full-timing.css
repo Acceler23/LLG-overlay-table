@@ -19,9 +19,8 @@ html, body {
 }
 
 #full-timing.hidden { display: none; }
-/* safety car: a tabela e o log ficam amarelos */
-#full-timing.sc-out .ft-table,
-#full-timing.sc-out .ft-log { background-color: rgb(230, 184, 0); }
+/* safety car / FCY: so uma etiqueta amarela no lugar do nome da sessao */
+#full-timing.sc-out #ftSessionLabel { padding: 2px 10px; border-radius: 3px; background: #f5e33f; color: #000; }
 
 /* ---- cabecalho: liga | pista | sessao ---- */
 .ft-title {
@@ -168,6 +167,10 @@ html, body {
 }
 
 .ft-row.dnf { opacity: 0.55; }
+
+/* causou a bandeira amarela: mesma cor da tabela de tempos */
+.ft-row.yellow,
+.ft-row.player.yellow { background-color: #c9a000; }
 
 /* piloto assistido: linha mais clara e a posicao em ciano */
 .ft-row.player {

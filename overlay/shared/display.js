@@ -204,7 +204,13 @@
       return hit ? String(names[hit]) : null;
     };
     const tidy = (text) => {
-      const t = String(text || "").trim().replace(/^ks_/i, "").replace(/_+/g, " ").replace(/\s+/g, " ").trim();
+      const t = String(text || "")
+        .trim()
+        .replace(/^ks_/i, "")
+        .replace(/_+/g, " ")
+        .replace(/([a-z])([A-Z])/g, "$1 $2") // nomes colados do AMS2: "SpaFrancorchamps" -> "Spa Francorchamps"
+        .replace(/\s+/g, " ")
+        .trim();
       // identificadores todos em minusculas (Assetto Corsa) ganham iniciais maiusculas
       return t && t === t.toLowerCase() ? t.replace(/\b[a-z]/g, (c) => c.toUpperCase()) : t;
     };
@@ -232,8 +238,12 @@
     let mapped = lookup(loc);
     if (mapped == null) mapped = contains(loc);
     const name = mapped != null ? mapped : tidy(loc);
-    const layout = tidy(lay);
-    return { name, layout: layout && layout.toLowerCase() !== name.toLowerCase() ? layout : "" };
+    // tracado sem o ano no fim ("Spa_Francorchamps_2022" -> "Spa Francorchamps"),
+    // e escondido quando e so o nome da pista de novo
+    let layout = tidy(lay).replace(/\s*\b(19|20)\d\d$/, "").trim();
+    // tracado que comeca com o nome da pista: so o resto ("Interlagos GP" -> "GP")
+    if (layout.toLowerCase().startsWith(name.toLowerCase() + " ")) layout = layout.slice(name.length).trim();
+    return { name, layout: layout && trackKey(layout) !== trackKey(name) ? layout : "" };
   }
 
   // ---- etapa da temporada (RLT) que corresponde a pista do jogo ----
@@ -323,6 +333,16 @@
 
   // Arquivo da bandeira no repositorio de imagens (pasta country/): o nome do
   // pais como o RLT informa, em minusculas, com "_" no lugar dos espacos.
+  // Etiqueta de punicao pendente: DT (drive-through) ou SG (stop & go) no AMS2;
+  // no LMU o jogo so informa quantas ha (PEN, ou PEN x2). Sem punicao: "".
+  const PENALTY_SHORT = { driveThrough: "DT", stopGo: "SG" };
+  function penaltyLabel(entry) {
+    if (!entry) return "";
+    if (entry.penaltyType && PENALTY_SHORT[entry.penaltyType]) return PENALTY_SHORT[entry.penaltyType];
+    if (entry.penalties > 0) return entry.penalties > 1 ? `PEN x${entry.penalties}` : "PEN";
+    return "";
+  }
+
   function flagFile(country) {
     const slug = String(country || "")
       .normalize("NFD")
@@ -364,6 +384,7 @@
     trackKey,
     countryName,
     flagFile,
+    penaltyLabel,
     heatNumber,
     formatClassName,
     hashColor,

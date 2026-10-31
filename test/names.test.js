@@ -154,3 +154,10 @@ test("lista do painel: ligar a mao, ignorar e situacao da ligacao", () => {
   assert.deepEqual(st.ignored, ["CAPITAOVIPS"]);
   assert.deepEqual(st.freeDrivers.map((d) => d.displayName), ["Beto Reis"]);
 });
+
+test("codigo da conta do online do LMU no fim do nome nao atrapalha a ligacao", () => {
+  const { normalizeName } = require("../overlay/shared/names");
+  assert.equal(normalizeName("Felipe Antunes#1005"), normalizeName("Felipe Antunes"));
+  assert.equal(normalizeName("Flavio Ribeiro #4089"), normalizeName("Flávio Ribeiro"));
+  assert.equal(normalizeName("Piloto 44"), "piloto 44"); // numero sem # continua
+});

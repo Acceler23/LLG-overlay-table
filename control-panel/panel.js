@@ -34,10 +34,24 @@ function send(name, payload = {}) {
 
 function setOpacity(target, value) {
   const v = Math.max(0, Math.min(100, Number(value) || 0));
-  const el = document.getElementById(target === "table" ? "opTableVal" : "opRowsVal");
+  const el = document.getElementById(target === "table" ? "opTableVal" : target === "map" ? "opMapVal" : "opRowsVal");
   if (el) el.textContent = v + "%";
+  if (target === "map") {
+    try {
+      localStorage.setItem("opMapPanel", String(v));
+    } catch (_) {}
+  }
   send("overlay.setOpacity", { target, value: v / 100 });
 }
+
+// o slider do mapa abre na ultima opacidade escolhida
+try {
+  const savedMap = localStorage.getItem("opMapPanel");
+  if (savedMap != null) {
+    document.getElementById("opMap").value = savedMap;
+    document.getElementById("opMapVal").textContent = savedMap + "%";
+  }
+} catch (_) {}
 
 // Intensidade do degrade com a cor da equipe nas linhas da tabela.
 function setTeamTint(value) {
@@ -299,6 +313,259 @@ async function setAccStint() {
 
 api("/api/acc/stint").then(showAccStint).catch(() => {});
 
+// ---------------------------------------------------------------- LMU
+// Direcao de prova (aba LMU, com senha). O desbloqueio vale ate fechar o
+// painel: o servidor devolve um token, guardado so na memoria desta pagina.
+// o acesso fica salvo neste PC (o servidor tambem lembra) ate "Bloquear a aba"
+const LMU_TOKEN_KEY = "llgLmuToken";
+let lmuTokenValue = "";
+try {
+  lmuTokenValue = localStorage.getItem(LMU_TOKEN_KEY) || "";
+} catch (_) {}
+function setLmuToken(t) {
+  lmuTokenValue = t || "";
+  try {
+    if (lmuTokenValue) localStorage.setItem(LMU_TOKEN_KEY, lmuTokenValue);
+    else localStorage.removeItem(LMU_TOKEN_KEY);
+  } catch (_) {}
+}
+let lmuFcyOn = false; // com FCY ou SC ligado o painel atualiza a cada segundo
+let lmuScOn = false;
+const lmuApi = (path, body) => {
+  const headers = { "Content-Type": "application/json", "X-LLG-Token": lmuTokenValue };
+  return api(path, body === undefined ? { headers } : { method: "POST", headers, body: JSON.stringify(body) });
+};
+
+function showLmuControl(st) {
+  if (st.unlocked === false) setLmuToken(""); // acesso esquecido (bloqueado): pede a senha de novo
+  lmuFcyOn = !!st.fcy;
+  lmuScOn = !!st.sc;
+  const by = (who) => (who && who !== "painel" ? ` (mandado no chat por ${who})` : "");
+  document.getElementById("lmuFcyNow").textContent = st.fcy ? `FCY ligado agora${by(st.fcyBy)}.` : st.sc ? `Safety Car ligado agora${by(st.scBy)}.` : "";
+  if (st.follow) document.getElementById("lmuFollow").checked = !!st.follow.enabled;
+  const unlocked = !!lmuTokenValue;
+  document.getElementById("lmuLocked").hidden = unlocked;
+  document.getElementById("lmuUnlocked").hidden = !unlocked;
+  if (!unlocked) return;
+  const btn = document.getElementById("fcyBtn");
+  btn.classList.toggle("on", !!st.fcy);
+  btn.textContent = !st.fcy ? "FCY" : st.greenLeft > 0 ? `VERDE EM ${st.greenLeft} · ENCERRAR JÁ` : "ENCERRAR FCY";
+  const scBtn = document.getElementById("scBtn");
+  scBtn.classList.toggle("on", !!st.sc);
+  scBtn.textContent = st.sc ? "ENCERRAR SAFETY CAR" : "SAFETY CAR";
+  document.getElementById("waveBtn").disabled = !st.sc || st.waveLeft > 0;
+  if (st.scCar) showScCar(st.scCar);
+  document.getElementById("waveStatus").textContent =
+    st.waveLeft > 0
+      ? `Nomes dos retardatários em ${st.waveLeft} s.`
+      : st.waveLast
+        ? st.waveLast.names.length
+          ? `Podem ultrapassar: ${st.waveLast.names.join(", ")}.`
+          : "Nenhum retardatário entre o SC e o líder."
+        : "";
+  document.getElementById("fcyStatus").textContent = !st.fcy ? "" : st.greenLeft > 0 ? `Bandeira verde em ${st.greenLeft} s (o limite de ${st.limitKmh} km/h vale até lá).` : st.countdownLeft > 0 ? `FCY ligado: limite de ${st.limitKmh} km/h vale em ${st.countdownLeft} s.` : `FCY ligado: limite de ${st.limitKmh} km/h valendo.`;
+  showFcyBreaches(st.breaches || []);
+  const cd = document.getElementById("lmuCountdown");
+  if (st.countdownSec != null && document.activeElement !== cd) cd.value = st.countdownSec;
+  const green = document.getElementById("lmuGreen");
+  if (st.greenSec != null && document.activeElement !== green) green.value = st.greenSec;
+  if (st.chatCountdown != null) document.getElementById("lmuChatCountdown").checked = !!st.chatCountdown;
+  if (st.messages) {
+    // nao atropela o que esta sendo digitado
+    const on = document.getElementById("lmuMsgOn");
+    const off = document.getElementById("lmuMsgOff");
+    if (document.activeElement !== on) on.value = st.messages.fcyOn;
+    if (document.activeElement !== off) off.value = st.messages.fcyOff;
+    const ending = document.getElementById("lmuMsgEnding");
+    if (document.activeElement !== ending) ending.value = st.messages.fcyEnding || "";
+    const go = document.getElementById("lmuMsgGo");
+    if (document.activeElement !== go) go.value = st.messages.fcyGo || "";
+    const scOn = document.getElementById("lmuMsgScOn");
+    const scOff = document.getElementById("lmuMsgScOff");
+    if (document.activeElement !== scOn) scOn.value = st.messages.scOn || "";
+    if (document.activeElement !== scOff) scOff.value = st.messages.scOff || "";
+    [["lmuMsgFcyTick", "fcyTick"], ["lmuMsgGreenTick", "greenTick"], ["lmuMsgScCatch", "scCatch"], ["lmuMsgScWave", "scWave"], ["lmuMsgScWaveDriver", "scWaveDriver"]].forEach(([id, key]) => {
+      const el = document.getElementById(id);
+      if (document.activeElement !== el) el.value = st.messages[key] || "";
+    });
+  }
+}
+
+// tempo em segundos com uma casa ("3,2 s")
+const fcySecs = (ms) => `${(Math.max(0, ms) / 1000).toFixed(1).replace(".", ",")} s`;
+
+function showFcyBreaches(list) {
+  const body = document.querySelector("#fcyBreaches tbody");
+  body.innerHTML = "";
+  list.forEach((b) => {
+    const tr = document.createElement("tr");
+    tr.className = b.live ? "live" : "";
+    [String(b.fcy), (b.carNumber ? `#${b.carNumber} ` : "") + b.name, fcySecs(b.overMs), fcySecs(b.afterMs), `${Math.round(b.maxKmh)} km/h`].forEach((text, i) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      if (i >= 2) td.className = "n";
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+  document.getElementById("fcyBreaches").hidden = !list.length;
+  document.getElementById("fcyNoBreach").hidden = !!list.length;
+}
+
+async function lmuSaveFollow() {
+  try {
+    const body = await api("/api/lmu/follow", {
+      method: "POST",
+      body: JSON.stringify({ enabled: document.getElementById("lmuFollow").checked }),
+    });
+    log(body.follow.enabled ? "LMU: seguindo o FCY e o SC do chat" : "LMU: não segue o FCY e o SC do chat");
+  } catch (e) {
+    log("ERRO seguir chat: " + e.message);
+  }
+}
+
+async function lmuUnlock() {
+  const input = document.getElementById("lmuPass");
+  const status = document.getElementById("lmuLockStatus");
+  try {
+    const st = await api("/api/lmu/unlock", { method: "POST", body: JSON.stringify({ password: input.value }) });
+    setLmuToken(st.token);
+    input.value = "";
+    status.textContent = "";
+    showLmuControl(st);
+  } catch (e) {
+    status.textContent = e.message;
+  }
+}
+
+async function lmuLock() {
+  await lmuApi("/api/lmu/lock", {}).catch(() => {});
+  setLmuToken("");
+  api("/api/lmu/control").then(showLmuControl).catch(() => {});
+}
+
+// tela de direcao de prova no navegador: leva o acesso junto (sem pedir a senha de novo)
+function lmuOpenDirecao() {
+  window.open("/panel/direcao.html" + (lmuTokenValue ? "#t=" + encodeURIComponent(lmuTokenValue) : ""));
+}
+
+async function lmuToggleFcy() {
+  const btn = document.getElementById("fcyBtn");
+  const on = !btn.classList.contains("on");
+  btn.disabled = true;
+  try {
+    const st = await lmuApi("/api/lmu/fcy", { on });
+    showLmuControl(st);
+    log(on ? "LMU: FCY ligado" : st.fcy ? `LMU: bandeira verde em ${st.greenLeft} s` : "LMU: FCY encerrado");
+  } catch (e) {
+    document.getElementById("fcyStatus").textContent = e.message;
+    log("ERRO FCY: " + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function lmuToggleSc() {
+  const btn = document.getElementById("scBtn");
+  const on = !btn.classList.contains("on");
+  btn.disabled = true;
+  try {
+    showLmuControl(await lmuApi("/api/lmu/sc", { on }));
+    log(on ? "LMU: Safety Car" : "LMU: Safety Car encerrado");
+  } catch (e) {
+    document.getElementById("fcyStatus").textContent = e.message;
+    log("ERRO Safety Car: " + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Carro do safety car: automatico (o unico LMGTE) ou um piloto da sessao
+function showScCar(info) {
+  const sel = document.getElementById("lmuScCar");
+  const autoText = info.auto && info.name ? `Automático (LMGTE): ${info.name}` : `Automático (LMGTE): ${info.problem || "sem dados do LMU"}`;
+  const options = [["", autoText]].concat(info.drivers.map((d) => [d.name, `${d.carNumber ? "#" + d.carNumber + " " : ""}${d.name}${d.carClass ? " · " + d.carClass : ""}`]));
+  // escolhido que saiu da sessao continua na lista (o servidor volta ao automatico)
+  if (info.chosen && !info.drivers.some((d) => d.name === info.chosen)) options.push([info.chosen, `${info.chosen} (fora da sessão)`]);
+  const key = JSON.stringify(options);
+  if (sel.dataset.key !== key && document.activeElement !== sel) {
+    sel.dataset.key = key;
+    sel.innerHTML = "";
+    options.forEach(([value, text]) => {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = text;
+      sel.appendChild(opt);
+    });
+  }
+  if (document.activeElement !== sel) sel.value = info.chosen || "";
+  document.getElementById("lmuScCarHint").textContent = info.name
+    ? `Safety Car: ${info.name}. Ele não conta como líder, não entra na lista de retardatários nem em "quem queimou o FCY".`
+    : `Sem carro do SC (${info.problem}): escolha o piloto do Safety Car. Sem ele, a fila vai até meia volta à frente do líder.`;
+}
+
+async function lmuSetScCar() {
+  try {
+    showLmuControl(await lmuApi("/api/lmu/sc/car", { name: document.getElementById("lmuScCar").value }));
+  } catch (e) {
+    log("ERRO carro do SC: " + e.message);
+  }
+}
+
+async function lmuWaveBy() {
+  const btn = document.getElementById("waveBtn");
+  btn.disabled = true;
+  try {
+    showLmuControl(await lmuApi("/api/lmu/sc/waveby", {}));
+    log("LMU: retardatários podem ultrapassar");
+  } catch (e) {
+    document.getElementById("waveStatus").textContent = e.message;
+    log("ERRO retardatários: " + e.message);
+    btn.disabled = false;
+  }
+}
+
+async function lmuSaveMessages() {
+  try {
+    showLmuControl(
+      await lmuApi("/api/lmu/messages", {
+        fcyOn: document.getElementById("lmuMsgOn").value,
+        fcyOff: document.getElementById("lmuMsgOff").value,
+        countdownSec: document.getElementById("lmuCountdown").value,
+        fcyGo: document.getElementById("lmuMsgGo").value,
+        fcyEnding: document.getElementById("lmuMsgEnding").value,
+        fcyTick: document.getElementById("lmuMsgFcyTick").value,
+        greenTick: document.getElementById("lmuMsgGreenTick").value,
+        greenSec: document.getElementById("lmuGreen").value,
+        scOn: document.getElementById("lmuMsgScOn").value,
+        scOff: document.getElementById("lmuMsgScOff").value,
+        scCatch: document.getElementById("lmuMsgScCatch").value,
+        scWave: document.getElementById("lmuMsgScWave").value,
+        scWaveDriver: document.getElementById("lmuMsgScWaveDriver").value,
+        chatCountdown: document.getElementById("lmuChatCountdown").checked,
+      })
+    );
+  } catch (e) {
+    log("ERRO mensagens: " + e.message);
+  }
+}
+
+lmuApi("/api/lmu/control").then(showLmuControl).catch(() => {}); // com o acesso salvo, ja abre desbloqueada
+// sessao nova desliga o FCY no servidor: o botao acompanha. Com FCY ligado,
+// a cada segundo (contagem e quem esta acima do limite agora)
+let lmuPollTick = 0;
+setInterval(() => {
+  lmuPollTick++;
+  // desbloqueado (direcao de prova), FCY ou SC: a cada segundo; senao a cada 5 s
+  if (!lmuTokenValue && !lmuFcyOn && !lmuScOn && lmuPollTick % 5) return;
+  if (document.getElementById("fcyBtn").disabled) return;
+  // resposta de um pedido feito antes de desbloquear (ou bloquear) nao vale mais
+  const sentToken = lmuTokenValue;
+  lmuApi("/api/lmu/control")
+    .then((st) => sentToken === lmuTokenValue && showLmuControl(st))
+    .catch(() => {});
+}, 1000);
+
 // Bateria mostrada no cabecalho da tabela (CORRIDA 2, QUALI 1): automatico
 // (vazio), 0 = sem numero, ou o numero escolhido
 function setHeat() {
@@ -329,6 +596,34 @@ function setBattleScope(value) {
   } catch (_) {}
   send("overlay.setBattleScope", { value });
 }
+
+// ---------------------------------------------------------------- mapa da pista
+async function showTrackMapStatus() {
+  try {
+    const { map } = await api("/api/trackmap");
+    document.getElementById("mapStatus").textContent = !map
+      ? "Sem pista carregada agora."
+      : map.ready
+        ? map.saved
+          ? "Mapa desta pista salvo."
+          : "Mapa desta pista pronto e salvo."
+        : `Aprendendo o mapa desta pista: ${Math.round((map.coverage || 0) * 100)}%`;
+  } catch (_) {}
+}
+
+async function forgetTrackMap() {
+  if (!window.confirm("Apagar o mapa salvo desta pista e aprender de novo com os carros na pista?")) return;
+  try {
+    await api("/api/trackmap/forget", { method: "POST", body: "{}" });
+    log("Mapa da pista apagado: aprendendo de novo");
+    showTrackMapStatus();
+  } catch (e) {
+    log("ERRO mapa: " + e.message);
+  }
+}
+
+showTrackMapStatus();
+setInterval(showTrackMapStatus, 10000);
 
 // ---------------------------------------------------------------- fotos dos pilotos
 // Pasta local das fotos do driver card (server/avatars.js)
@@ -791,6 +1086,7 @@ function fillLinks() {
   const base = `http://localhost:${location.port || 8080}`;
   document.getElementById("linkTable").value = `${base}/overlay/timing-table.html`;
   document.getElementById("linkCard").value = `${base}/overlay/driver-card.html`;
+  document.getElementById("linkMap").value = `${base}/overlay/track-map.html`;
   document.getElementById("linkDriver").value = `${base}/overlay/driver-table.html`;
   document.getElementById("linkTrackStats").value = `${base}/overlay/track-stats.html`;
   document.getElementById("linkFull").value = `${base}/overlay/full-timing.html`;

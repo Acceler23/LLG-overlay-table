@@ -62,9 +62,11 @@ function createRaceState(clock) {
   let baselineLocked = false;
   const pit = new Map(); // nome -> { stops, wasInPit, stintStartLap, stintLaps, timer }
   const finished = new Map(); // nome -> instante (ms) em que recebeu a bandeirada
+  let finalLapsTarget = null; // corrida por tempo: voltas do lider para receber a bandeirada (depois do relogio zerar)
   const bestLaps = new Map(); // nome -> { ms, lap }: em que volta saiu a melhor volta
 
   function reset() {
+    finalLapsTarget = null;
     startPositions = new Map();
     baselineLocked = false;
     pit.clear();
@@ -87,6 +89,25 @@ function createRaceState(clock) {
       return entry.lapsCompleted;
     }
     return null;
+  }
+
+  // Corrida por tempo depois do relogio zerar: quantas voltas o lider ainda
+  // precisa completar. Ele termina a volta em que estava quando o tempo acabou
+  // e mais as voltas extras da sessao (o AMS2 informa em additionalLaps; os
+  // outros jogos, nenhuma). null fora desse caso (o cabecalho mostra o relogio).
+  function lapsLeftAfterTime(session, standings) {
+    const timed = Number(session.state) === 5 && !(Number(session.lapsInEvent) > 0);
+    const remaining = Number(session.timeRemainingSec);
+    if (!timed || !Number.isFinite(remaining) || remaining > 0) {
+      finalLapsTarget = null;
+      return null;
+    }
+    const running = standings.filter((e) => e && !(e.raceState === 4 || e.raceState === 5 || e.raceState === 6));
+    const leader = running.slice().sort((a, b) => (a.position || 999) - (b.position || 999))[0];
+    if (!leader) return null;
+    const done = Number(leader.lapsCompleted) || 0;
+    if (finalLapsTarget == null) finalLapsTarget = done + 1 + Math.max(0, Number(session.additionalLaps) || 0);
+    return Math.max(0, finalLapsTarget - done);
   }
 
   // Posicao do carro dentro da volta, em metros (null se nao der pra calcular).
@@ -205,6 +226,7 @@ function createRaceState(clock) {
       entry.finishedAtMs = finished.has(name) ? finished.get(name) : null;
     });
 
+    session.lapsLeft = lapsLeftAfterTime(session, standings);
     payload.ts = t;
     return payload;
   }

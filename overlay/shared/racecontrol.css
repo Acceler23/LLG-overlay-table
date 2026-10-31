@@ -1,0 +1,183 @@
+/* overlay/shared/racecontrol.css
+   Safety car / FCY: painel e etiqueta "race control" (shared/racecontrol.js).
+   Cada pagina diz onde eles ficam e ajusta os tamanhos. Animacao medida
+   quadro a quadro na transmissao da GT2 European Series: o painel cresce de cima
+   para baixo, rapido no comeco e freando; "race control" aparece logo e o texto
+   grande so com o painel em ~60%. Na saida, o inverso. PANEL_MS em
+   shared/racecontrol.js e o tempo ate a saida comecar. */
+#rcPanel {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 0 0 6px 6px;
+  color: #000;
+  text-transform: uppercase;
+}
+
+#rcPanel[hidden],
+#rcTag[hidden] {
+  display: none;
+}
+
+.rcp-head {
+  flex: 0 0 auto;
+  padding: 10px 0;
+  background: #000;
+  color: #fff;
+  font-size: 40px;
+  font-weight: 800;
+  line-height: 1.05;
+  text-align: center;
+}
+
+.rcp-head > span {
+  display: block;
+}
+
+.rcp-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: #f5e33f;
+  font-size: 108px;
+  font-weight: 900;
+  line-height: 1.02;
+  text-align: center;
+}
+
+/* FCY tem tres linhas e palavras mais largas */
+#rcPanel.rc-fcy .rcp-body {
+  font-size: 92px;
+}
+
+#rcPanel.rc-in {
+  animation: rc-panel-grow 1.1s linear both;
+}
+
+#rcPanel.rc-out {
+  animation: rc-panel-shrink 1.2s linear both;
+}
+
+#rcPanel.rc-in .rcp-head > span {
+  animation: rc-fade-in 0.2s linear 0.15s both;
+}
+
+#rcPanel.rc-in .rcp-body > span {
+  animation: rc-fade-in 0.25s linear 0.35s both;
+}
+
+#rcPanel.rc-out .rcp-body > span {
+  animation: rc-fade-out 0.3s linear 0.45s both;
+}
+
+#rcPanel.rc-out .rcp-head > span {
+  animation: rc-fade-out 0.2s linear 0.8s both;
+}
+
+/* altura do painel a cada ~100 ms, medida no video (o fim da entrada e o comeco
+   da saida ficam fora do quadro medido: ali a curva e estimada) */
+@keyframes rc-panel-grow {
+  0% { height: 0; }
+  9% { height: calc(var(--rc-h) * 0.22); }
+  18% { height: calc(var(--rc-h) * 0.4); }
+  27% { height: calc(var(--rc-h) * 0.52); }
+  36% { height: calc(var(--rc-h) * 0.6); }
+  45% { height: calc(var(--rc-h) * 0.65); }
+  55% { height: calc(var(--rc-h) * 0.69); }
+  70% { height: calc(var(--rc-h) * 0.8); }
+  85% { height: calc(var(--rc-h) * 0.92); }
+  100% { height: var(--rc-h); }
+}
+
+@keyframes rc-panel-shrink {
+  0% { height: var(--rc-h); }
+  25% { height: calc(var(--rc-h) * 0.85); }
+  50% { height: calc(var(--rc-h) * 0.68); }
+  58% { height: calc(var(--rc-h) * 0.64); }
+  67% { height: calc(var(--rc-h) * 0.57); }
+  75% { height: calc(var(--rc-h) * 0.48); }
+  83% { height: calc(var(--rc-h) * 0.34); }
+  92% { height: calc(var(--rc-h) * 0.1); }
+  100% { height: 0; }
+}
+
+@keyframes rc-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes rc-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+#rcTag {
+  position: absolute;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  height: 64px;
+  min-width: 170px;
+  text-align: center;
+  text-transform: uppercase;
+  white-space: nowrap;
+  animation: rc-tag-in 0.3s ease-out 0.2s both;
+}
+
+.rct-head {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  background: #000;
+  color: #fff;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.rct-body {
+  flex: 1 1 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+  background: #f5e33f;
+  color: #000;
+  border-radius: 0 0 8px 0;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+@keyframes rc-tag-in {
+  from { clip-path: inset(0 100% 0 0); }
+  to { clip-path: inset(0 0 0 0); }
+}
+
+/* "preparar para verde" e "bandeira verde": palavras mais largas */
+#rcPanel.rc-long .rcp-body {
+  font-size: 84px;
+}
+
+/* bandeira verde: o painel inteiro e a etiqueta ficam verdes */
+#rcPanel .rcp-head,
+#rcPanel .rcp-body,
+#rcTag .rct-head,
+#rcTag .rct-body {
+  transition: background-color 0.25s linear, color 0.25s linear;
+}
+
+#rcPanel.rc-green .rcp-head,
+#rcPanel.rc-green .rcp-body,
+#rcTag.rc-green .rct-head,
+#rcTag.rc-green .rct-body {
+  background-color: #17a34a;
+  color: #fff;
+}

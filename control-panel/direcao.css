@@ -1,0 +1,285 @@
+/* Direcao de prova (control-panel/direcao.html): todos os carros como na
+   tabela completa (overlay/full-timing.css, mesmas cores), com a situacao de
+   cada um na linha e o log de incidentes a direita. Ocupa a janela inteira
+   do navegador. */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: #061d38;
+  font-family: "Segoe UI", Arial, sans-serif;
+  color: #fff;
+}
+
+button { font-family: inherit; cursor: pointer; }
+
+/* ---- senha ---- */
+#login {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+#login[hidden] { display: none; }
+
+.login-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 320px;
+  padding: 20px;
+  background: #0a2d52;
+  border: 2px solid #00c5fd;
+  border-radius: 8px;
+}
+
+.login-title { font-size: 20px; font-weight: 800; text-transform: uppercase; }
+.login-card input { padding: 10px; font-size: 16px; border: 1px solid #3a5a8c; border-radius: 4px; background: #061d38; color: #fff; }
+.login-card button { padding: 10px; font-size: 16px; font-weight: 800; border: none; border-radius: 4px; background: #0b5ed7; color: #fff; }
+.login-error { min-height: 18px; color: #ff6b6b; font-size: 14px; }
+
+#rc {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+#rc[hidden] { display: none; }
+
+/* ---- cabecalho: titulo | pista | bandeira | relogio ---- */
+.rc-title {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  height: 56px;
+  background-color: #0a2d52;
+  text-transform: uppercase;
+  font-weight: 800;
+}
+
+.rc-brand {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  background-color: #0b5ed7;
+  font-size: 22px;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
+
+.rc-track,
+.rc-flag,
+.rc-clock {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  font-size: 19px;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.rc-flag { min-width: 170px; justify-content: center; background-color: #1f9d55; }
+.rc-flag.fcy { background-color: #e6b800; color: #111; }
+.rc-flag.sc { background-color: #ff8c1a; color: #111; }
+.rc-clock { background-color: #061d38; font-variant-numeric: tabular-nums; }
+
+/* ---- botoes da direcao ---- */
+.rc-tools {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background-color: #0a2d52;
+  border-top: 1px solid rgba(0, 197, 253, 0.35);
+}
+
+.tool { padding: 8px 16px; font-size: 15px; font-weight: 800; letter-spacing: 0.5px; border: none; border-radius: 6px; }
+.tool.fcy { background: #e6b800; color: #111; }
+.tool.sc { background: #ff8c1a; color: #111; }
+.tool.wave { background: #3a7bd5; color: #fff; }
+.tool.on { background: #1f9d55; color: #fff; }
+.tool:disabled { opacity: 0.45; cursor: default; }
+.tool-status { font-size: 14px; color: #bcd; }
+.tool.live { background: #c62828; color: #fff; }
+.tool.sound { margin-left: auto; background: transparent; border: 1px solid #3a5a8c; color: #fff; }
+.tool.sound.off { color: #8aa; }
+.tool.logout { background: transparent; border: 1px solid #3a5a8c; color: #bcd; }
+
+/* ---- tabela | log ---- */
+.rc-body {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+.rc-table {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-y: auto;
+  background-color: #0a2d52;
+}
+
+.rc-row {
+  display: grid;
+  grid-template-columns: 52px 52px minmax(140px, 1fr) 48px minmax(0, 200px) 70px minmax(150px, 220px);
+  align-items: stretch;
+}
+
+.rc-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 30px;
+  background-color: #0a2d52;
+  border-bottom: 1px solid rgba(0, 197, 253, 0.35);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  color: #bcd;
+}
+
+.rc-head > div { display: flex; align-items: center; padding: 0 8px; }
+
+#rows .rc-row {
+  height: 38px;
+  font-size: 17px;
+  background-color: rgb(14, 66, 165);
+  border-top: 2px solid #3a5a8c;
+}
+
+#rows .rc-row > div {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0 8px;
+}
+
+.c-pos, .c-cls { justify-content: center; font-weight: 800; }
+.c-pos { background-color: #0a2d52; }
+.rc-head .c-pos, .rc-head .c-cls { justify-content: center; }
+.c-name { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.c-name span, .c-team span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.c-logo { justify-content: center; }
+.c-logo img { max-width: 32px; max-height: 28px; }
+.c-team { font-size: 14px; opacity: 0.85; }
+.c-speed { justify-content: flex-end; font-variant-numeric: tabular-nums; font-weight: 700; }
+.rc-head .c-speed { justify-content: flex-end; }
+
+/* situacao: etiquetas */
+.c-state { gap: 4px; }
+.tag { padding: 2px 6px; border-radius: 3px; font-size: 12px; font-weight: 800; letter-spacing: 0.4px; white-space: nowrap; }
+.tag.box { background: #ffd400; color: #111; }
+.tag.slow { background: #ff3b3b; color: #fff; }
+.tag.over { background: #ff3b3b; color: #fff; }
+.tag.sccar { background: #ff8c1a; color: #111; }
+.tag.dnf { background: #555; color: #ddd; }
+
+/* linhas em destaque: lento agora (vermelho), acima do limite no FCY (amarelo) */
+#rows .rc-row.slow { background-color: #8f1d1d; }
+#rows .rc-row.over { background-color: #7a6200; }
+#rows .rc-row.sccar { background-color: #6b3d00; }
+#rows .rc-row.dnf { opacity: 0.5; }
+.speed-low { color: #ff8080; }
+.speed-high { color: #ffd400; }
+
+/* ---- log de incidentes ---- */
+.rc-log {
+  flex: 0 0 340px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background-color: #0d2f5c;
+  border-left: 2px solid #3a5a8c;
+}
+
+.rc-log-head {
+  flex: 0 0 auto;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  color: #bcd;
+  border-bottom: 1px solid rgba(0, 197, 253, 0.35);
+}
+
+.log-list { flex: 1 1 auto; overflow-y: auto; }
+
+.lg {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  border-bottom: 1px solid #1d4677;
+  border-left: 4px solid var(--lg, #888);
+}
+
+.lg.slow { --lg: #ff3b3b; }
+.lg.fcy { --lg: #ffd400; }
+.lg.overtake { --lg: #ff8c1a; }
+.lg.allowed { --lg: #777; opacity: 0.6; }
+.lg.live { background-color: rgba(255, 59, 59, 0.18); }
+
+.lg-meta { display: flex; flex-direction: column; justify-content: center; align-items: center; padding: 6px 4px; background: rgba(0, 0, 0, 0.18); font-size: 12px; font-variant-numeric: tabular-nums; }
+.lg-meta b { font-size: 14px; }
+.lg-body { padding: 6px 10px; min-width: 0; }
+.lg-type { font-size: 11px; font-weight: 800; letter-spacing: 0.5px; color: var(--lg); text-transform: uppercase; }
+.lg-line { display: flex; justify-content: space-between; gap: 8px; font-size: 15px; }
+.lg-line span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lg-line .r { flex: 0 0 auto; font-variant-numeric: tabular-nums; opacity: 0.85; }
+/* clicar leva ao momento no replay */
+.lg[data-et] { cursor: pointer; }
+.lg[data-et]:hover { background-color: rgba(255, 255, 255, 0.1); }
+.lg-go { margin-top: 2px; font-size: 11px; opacity: 0.65; }
+
+/* incidentes do jogo */
+.lg.contact { --lg: #4db8ff; }
+.lg.wall { --lg: #c79bff; }
+.force { padding: 0 5px; border-radius: 3px; font-size: 12px; font-weight: 800; }
+.force.low { background: #2f6f4f; }
+.force.mid { background: #b98900; color: #111; }
+.force.high { background: #c62828; }
+.force.none { background: transparent; color: #8aa; font-weight: 400; }
+
+.lg-empty { padding: 12px; font-size: 14px; color: #8aa; }
+
+/* ---- avisos de carro lento ---- */
+#toasts {
+  position: fixed;
+  bottom: 16px; /* embaixo: nao cobre os botoes do topo */
+  right: 16px;
+  z-index: 10;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  pointer-events: none;
+}
+
+.toast {
+  padding: 10px 14px;
+  border-left: 6px solid #fff;
+  border-radius: 6px;
+  background: #c62828;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  font-size: 15px;
+  animation: toast-in 0.2s ease-out;
+}
+
+.toast b { display: block; font-size: 12px; letter-spacing: 0.6px; text-transform: uppercase; opacity: 0.9; }
+.toast.out { opacity: 0; transition: opacity 0.4s; }
+
+@keyframes toast-in {
+  from { transform: translateX(30px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}

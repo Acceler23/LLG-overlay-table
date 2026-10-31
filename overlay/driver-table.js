@@ -465,6 +465,23 @@ function renderNow() {
   renderPoints(me, points);
 }
 
+// Safety car / FCY: painel e etiqueta em shared/racecontrol.js. O painel cobre a
+// tabela abaixo do titulo, sem passar do fim da janela.
+const RC_MIN_PANEL_H = 420;
+function placeRaceControl() {
+  const root = document.getElementById("driver-table");
+  const panel = document.getElementById("rcPanel");
+  if (panel.hidden) return;
+  const top = root.offsetTop + root.querySelector(".dt-title").offsetHeight + 1;
+  const zoom = Number(document.documentElement.style.zoom) || 1;
+  const room = window.innerHeight / zoom - top;
+  panel.style.top = `${top}px`;
+  panel.style.left = `${root.offsetLeft}px`;
+  panel.style.width = `${root.offsetWidth}px`;
+  panel.style.setProperty("--rc-h", `${Math.min(room, Math.max(root.offsetHeight - top, RC_MIN_PANEL_H))}px`);
+}
+const raceControl = LLGRaceControl.create({ place: placeRaceControl });
+
 function handleStandings(payload) {
   const list = Array.isArray(payload) ? payload : (payload && payload.standings) || [];
   session = Array.isArray(payload) ? null : (payload && payload.session) || null;
@@ -490,6 +507,7 @@ function handleStandings(payload) {
   gapTracker.update(standings, (!Array.isArray(payload) && payload && payload.ts) || Date.now());
   if (rltMatcher) rltMatcher.prime(standings.map((e) => e.name));
   render();
+  raceControl.update(standings.length ? session : null);
 }
 
 // O servidor manda a "versao" dos arquivos da overlay ao conectar e de tempos

@@ -319,6 +319,11 @@ const COL_HEADER_H = 32; // linha de baixo do cabecalho (.header no CSS)
 const ROW_H = 49;
 const CLASS_HDR_H = 49;
 const SAFETY_H = 6; // bordas da tabela (com o cabecalho de 94 px, 20 linhas dao 1075 px)
+// Rodape do clima (.weather-bar no CSS, 32 px). Nao tira espaco dos pilotos:
+// so aparece quando cabe dentro de MAX_TABLE_H junto com as linhas da tela
+// (com 20 pilotos numa classe so, a tabela fica completa e o rodape some).
+const FOOTER_H = 32;
+let weatherData = false; // o jogo informa o clima (AMS2, LMU)
 let rotateTick = 0;
 const ROTATE_MS = 10000;
 
@@ -637,6 +642,7 @@ function connect() {
       if (latestStandings.length) render(latestStandings);
     } else if (msg.type === "assetsConfig") {
       logoLoader.setConfig(msg.data || {});
+      loadWeatherIcons();
       if (latestStandings.length) render(latestStandings);
     }
   });
@@ -710,6 +716,11 @@ function getLeader() {
     if (!leader || e.position < leader.position) leader = e;
   });
   return leader;
+}
+
+// "ULTIMA VOLTA" ou "+2 VOLTAS" (corrida por tempo depois do relogio zerar)
+function lapsLeftLabel(n) {
+  return n <= 1 ? "ÚLTIMA VOLTA" : `+${n} VOLTAS`;
 }
 
 function formatClock(totalSeconds) {
@@ -818,10 +829,54 @@ function updateTrackTag() {
   if (!table || !tag) return;
   tag.style.top = `${table.offsetTop}px`;
   tag.style.left = `${table.offsetLeft + table.offsetWidth}px`;
+  placeRaceControl();
+}
+
+// Clima no rodape: temperatura da pista e do ar e chuva (AMS2 e LMU informam)
+function updateWeather(session) {
+  const has = typeof session.trackTempC === "number" || typeof session.ambientTempC === "number";
+  weatherData = has;
+  if (!has) {
+    document.getElementById("weatherBar").hidden = true;
+    return;
+  }
+  const t = (v) => (typeof v === "number" && Number.isFinite(v) ? `${v.toFixed(0)}°C` : "—");
+  document.getElementById("wbTrack").textContent = t(session.trackTempC);
+  document.getElementById("wbAir").textContent = t(session.ambientTempC);
+  document.getElementById("wbRain").textContent = typeof session.rain === "number" ? `${Math.round(session.rain * 100)}%` : "—";
+}
+
+// mostra o rodape so se ele couber junto com as linhas que estao na tela
+function fitWeatherBar() {
+  const bar = document.getElementById("weatherBar");
+  if (!weatherData) {
+    bar.hidden = true;
+    return;
+  }
+  const table = document.getElementById("timing-table");
+  const withoutBar = table.offsetHeight - (bar.hidden ? 0 : bar.offsetHeight);
+  bar.hidden = withoutBar + FOOTER_H > MAX_TABLE_H;
+}
+
+function loadWeatherIcons() {
+  [
+    ["wbIcTrack", "weather/track_temp.png"],
+    ["wbIcAir", "weather/air_temp.png"],
+    ["wbIcRain", "weather/rain.png"],
+  ].forEach(([id, file]) => {
+    const img = document.getElementById(id);
+    if (!img.dataset.watch) {
+      img.dataset.watch = "1";
+      img.addEventListener("load", () => img.parentElement.classList.add("has-icon"));
+    }
+    img.parentElement.classList.remove("has-icon");
+    logoLoader.load(img, [file]);
+  });
 }
 
 function updateSessionHeader(session) {
   if (!session) return;
+  updateWeather(session);
   latestTrack = { location: session.trackLocation || "", variation: session.trackVariation || "" };
   stintLimitMin = Number(session.stintLimitMin) || 0;
   updateHeaderBrand(); // define a etapa (latestEvent), usada no numero da bateria
@@ -841,6 +896,9 @@ function updateSessionHeader(session) {
       } else {
         timerEl.textContent = `Volta ${leadLap}/${latestLapsInEvent}`;
       }
+    } else if (session.lapsLeft != null) {
+      // corrida por tempo com o relogio zerado: as voltas que o lider ainda faz (servidor)
+      timerEl.textContent = lapsLeftLabel(session.lapsLeft);
     } else {
       const totalSeconds = typeof session.timeRemainingSec === "number" ? session.timeRemainingSec : 0;
       timerEl.textContent = formatClock(totalSeconds);
@@ -851,8 +909,36 @@ function updateSessionHeader(session) {
   }
 
   const table = document.getElementById("timing-table");
-  if (table) table.classList.toggle("sc-out", !!session.scOut);
-  latestScOut = !!session.scOut;
+  if (table) table.classList.toggle("sc-out", !!(session.scOut || session.fcy));
+  latestScOut = !!(session.scOut || session.fcy);
+  raceControl.update(session);
+}
+
+// Safety car / FCY: painel e etiqueta em shared/racecontrol.js
+const RC_MIN_PANEL_H = 640; // o painel e mais alto que uma tabela com poucos carros
+const raceControl = LLGRaceControl.create({
+  place: placeRaceControl,
+  onUpdate: (active) => document.getElementById("trackTag").classList.toggle("rc-joined", active),
+});
+
+function placeRaceControl() {
+  const table = document.getElementById("timing-table");
+  const panel = document.getElementById("rcPanel");
+  const tag = document.getElementById("rcTag");
+  const track = document.getElementById("trackTag");
+  if (!table) return;
+  if (!panel.hidden) {
+    const titleH = table.querySelector(".title-bar").offsetHeight + 2; // + a borda de cima
+    panel.style.top = `${table.offsetTop + titleH}px`;
+    panel.style.left = `${table.offsetLeft}px`;
+    panel.style.width = `${table.offsetWidth}px`;
+    panel.style.setProperty("--rc-h", `${Math.max(table.offsetHeight - titleH, RC_MIN_PANEL_H)}px`);
+  }
+  if (!tag.hidden) {
+    const hasTrack = !track.classList.contains("no-track");
+    tag.style.top = `${table.offsetTop}px`;
+    tag.style.left = `${table.offsetLeft + table.offsetWidth + (hasTrack ? track.offsetWidth : 0)}px`;
+  }
 }
 
 // Nome e cor de classe e arquivos de logo: regras compartilhadas com o
@@ -1998,6 +2084,7 @@ function renderNow(standings) {
   table.classList.toggle("battle-on", battleActive());
   table.classList.toggle("battle-has", battleActive() && battleNames.size > 0);
   renderTable(standings);
+  fitWeatherBar();
   // ao lado da tabela, nesta ordem: velocidade dos carros em disputa, pneus e
   // VE (LMU) e, por ultimo, o relogio da volta mais rapida
   updateTrackTag();
@@ -2143,7 +2230,7 @@ function renderTable(standings) {
       fresh.dataset.view = "race";
       fresh.innerHTML = `
         <span class="col pos"></span>
-        <span class="col name"><img class="logo" style="display:none" /><span class="name-text"></span><span class="sectors"><i></i><i></i><i></i></span><span class="pit-badge" style="display:none">P</span></span>
+        <span class="col name"><img class="logo" style="display:none" /><span class="name-text"></span><span class="sectors"><i></i><i></i><i></i></span><span class="pen-badge" hidden></span><span class="pit-badge" style="display:none">P</span></span>
         <span class="col right-value"></span>
       `;
       if (el) container.replaceChild(fresh, el);
@@ -2246,6 +2333,11 @@ function renderTable(standings) {
     // quem abandonou nao tem mais posicao: a coluna da direita ja mostra DNF
     posEl.textContent = isDnf(entry) ? "—" : item.displayPosition;
     el.querySelector(".name-text").textContent = rltDisplayName(entry);
+    // punicao pendente, como na tabela completa
+    const penBadge = el.querySelector(".pen-badge");
+    const penText = isDnf(entry) ? "" : LLGDisplay.penaltyLabel(entry);
+    if (penBadge.textContent !== penText) penBadge.textContent = penText;
+    penBadge.hidden = !penText;
     const gKey = groupKey(entry, standings);
     const rowBestFastest = (isClassMode && bestFastestByClass[gKey] != null)
       ? bestFastestByClass[gKey]

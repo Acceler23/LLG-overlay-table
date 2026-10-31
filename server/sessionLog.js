@@ -72,6 +72,7 @@ function createSessionLog(opts) {
   const yellowSince = new Map(); // nome -> desde quando esta com bandeira amarela
   const yellowLogged = new Map(); // nome -> quando entrou no log
   let scOut = null; // safety car / amarela geral na leitura anterior
+  let fcy = null; // FCY ligado pelo painel (LMU) na leitura anterior
   let localYellow = { on: false, since: null, clearSince: null };
   let lastAt = null;
   let remainingSec = null; // da leitura atual
@@ -91,6 +92,7 @@ function createSessionLog(opts) {
     yellowSince.clear();
     yellowLogged.clear();
     scOut = null;
+    fcy = null;
     localYellow = { on: false, since: null, clearSince: null };
     lastAt = null;
   }
@@ -255,8 +257,17 @@ function createSessionLog(opts) {
     const leader = list.slice().sort((a, b) => a.position - b.position)[0] || null;
     // amarela geral / safety car (AMS2 e LMU)
     const sc = !!session.scOut;
-    if (scOut !== null && sc !== scOut) push(t, leader, { type: sc ? "safetyCar" : "green" });
+    if (scOut !== null && sc !== scOut && (sc || !session.fcy)) push(t, leader, { type: sc ? "safetyCar" : "green" });
     scOut = sc;
+    // FCY queimado (acima de 60 km/h depois da contagem): server/raceControl.js.
+    // Antes da bandeira verde: quem ainda estava acima fecha quando o FCY acaba.
+    (session.fcyBreaches || []).forEach((b) => {
+      const e = list.find((x) => x.name === b.name) || leader;
+      push(t, e, { type: "fcyBreach", driver: b.name, overMs: b.overMs, afterMs: b.afterMs, maxKmh: Math.round(b.maxKmh) });
+    });
+    const f = !!session.fcy;
+    if (fcy !== null && f !== fcy && (f || !sc)) push(t, leader, { type: f ? "fcy" : "green" });
+    fcy = f;
 
     // AMS2: o carro lento dentro da bandeira amarela
     list.forEach((e) => {

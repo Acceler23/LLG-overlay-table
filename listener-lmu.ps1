@@ -46,6 +46,10 @@ $SC_NUM_VEHICLES      = 104       # long
 $SC_GAME_PHASE        = 108       # uchar: 3=volta de formacao 5=verde 6=bandeira amarela geral/safety car 8=fim
 $SC_SECTOR_FLAGS      = 110       # schar[3] lido sem sinal (255 = -1, invalido): bandeira amarela local por setor; a ordem dos setores nao e documentada
 $SC_TIME_REMAINING    = 340       # float, segundos
+# clima (ScoringInfoV01, depois de mPlrFileName): doubles
+$SC_RAINING           = 220       # 0 a 1
+$SC_AMBIENT_TEMP      = 228       # graus Celsius
+$SC_TRACK_TEMP        = 236       # graus Celsius
 
 $VEH                  = 2192      # VehicleScoringInfoV01[104]
 $VEH_SIZE             = 584
@@ -56,6 +60,7 @@ $V_TOTAL_LAPS         = 100       # short
 $V_SECTOR             = 102       # sbyte: 0=setor 3, 1=setor 1, 2=setor 2
 $V_FINISH_STATUS      = 103       # sbyte: 0=nada 1=terminou 2=dnf 3=dq
 $V_LAP_DIST           = 104       # double
+$V_POS                = 264       # double[3] mPos: X, Y (altura), Z do mundo (mapa da pista)
 $V_BEST_SECTOR1       = 128       # double
 $V_BEST_SECTOR2       = 136       # double (setor 1 + setor 2)
 $V_BEST_LAP           = 144       # double
@@ -79,6 +84,7 @@ $TEL_ACTIVE           = 128464    # uchar, quantos TelemInfoV01 sao validos
 $TEL                  = 128468    # TelemInfoV01[104]
 $TEL_SIZE             = 1888
 $T_ID                 = 0         # long, slot (casa com V_ID)
+$T_LOCAL_VEL          = 184       # double[3] mLocalVel, m/s
 $T_GEAR               = 352       # long: -1 re, 0 neutro, 1+ marchas
 $T_THROTTLE           = 388       # double, 0.0 a 1.0 (pedal do piloto, sem filtro)
 $T_BRAKE              = 396       # double, 0.0 a 1.0
@@ -87,6 +93,8 @@ $T_BRAKE              = 396       # double, 0.0 a 1.0
 # o valor e esticado: a partir deste ponto ja conta como pe no fundo.
 $THROTTLE_FULL_AT     = 0.85
 $T_FUEL               = 524       # double, litros
+$T_LAST_IMPACT_ET     = 552       # double, tempo da sessao do ultimo impacto
+$T_LAST_IMPACT_MAG    = 560       # double, forca do ultimo impacto (escala do jogo)
 $T_FRONT_COMPOUND     = 620       # char[18], ex: "Medium"
 $T_REAR_COMPOUND      = 638       # char[18]
 $T_LAP_INVALIDATED    = 745       # bool
@@ -251,7 +259,8 @@ while ($true) {
                     if ($place -le 0) { continue }
 
                     $slot = [BitConverter]::ToInt32($buf, $v + $V_ID)
-                    $name = Read-CString $buf ($v + $V_DRIVER_NAME) 32
+                    # sem o codigo da conta do online ("Felipe Antunes#1005" -> "Felipe Antunes")
+                    $name = (Read-CString $buf ($v + $V_DRIVER_NAME) 32) -replace '\s*#\d+\s*$', ''
                     $vehicleName = Read-CString $buf ($v + $V_VEHICLE_NAME) 64
                     $carClass = Read-CString $buf ($v + $V_VEHICLE_CLASS) 32
                     $laps = [int][BitConverter]::ToInt16($buf, $v + $V_TOTAL_LAPS)
@@ -261,9 +270,13 @@ while ($true) {
                     $finish = [int]$buf[$v + $V_FINISH_STATUS]
                     if ($finish -gt 127) { $finish = 0 }   # sbyte negativo: sem status
 
-                    $vx = [BitConverter]::ToDouble($buf, $v + $V_LOCAL_VEL)
-                    $vy = [BitConverter]::ToDouble($buf, $v + $V_LOCAL_VEL + 8)
-                    $vz = [BitConverter]::ToDouble($buf, $v + $V_LOCAL_VEL + 16)
+                    # velocidade: da telemetria do mesmo slot quando houver (atualiza
+                    # mais rapido que a pontuacao, que so muda a cada ~200 ms)
+                    $velAt = $v + $V_LOCAL_VEL
+                    if ($telemBySlot.ContainsKey($slot)) { $velAt = $telemBySlot[$slot] + $T_LOCAL_VEL }
+                    $vx = [BitConverter]::ToDouble($buf, $velAt)
+                    $vy = [BitConverter]::ToDouble($buf, $velAt + 8)
+                    $vz = [BitConverter]::ToDouble($buf, $velAt + 16)
                     $speed = [math]::Sqrt($vx * $vx + $vy * $vy + $vz * $vz)
                     $speedKmh = [math]::Round($speed * 3.6, 1)
                     if (-not $maxSpeedKmh.ContainsKey($name) -or $speedKmh -gt $maxSpeedKmh[$name]) {
@@ -311,8 +324,11 @@ while ($true) {
                     $tyreFront = $null; $tyreRear = $null; $tyreWear = $null; $tyres = $null
                     $throttle = $null; $brake = $null; $gear = $null
                     $virtualEnergy = $null; $fuelL = $null; $lapInvalid = ($buf[$v + $V_COUNT_LAP_FLAG] -ne 2)
+                    $lastImpactEt = $null; $lastImpactMag = $null
                     if ($telemBySlot.ContainsKey($slot)) {
                         $t = $telemBySlot[$slot]
+                        $lastImpactEt = [math]::Round([BitConverter]::ToDouble($buf, $t + $T_LAST_IMPACT_ET), 2)
+                        $lastImpactMag = [math]::Round([BitConverter]::ToDouble($buf, $t + $T_LAST_IMPACT_MAG), 1)
                         $model = Read-CString $buf ($t + $T_VEHICLE_MODEL) 30
                         if ($model) { $carName = $model }
                         $tyreFront = Read-CString $buf ($t + $T_FRONT_COMPOUND) 18
@@ -349,6 +365,9 @@ while ($true) {
                         lapsCompleted = $laps
                         currentLap    = $laps + 1
                         totalDistance = ([double]$laps * $trackLength) + $lapDist
+                        lapDistance   = [math]::Round([double]$lapDist, 1)
+                        worldX        = [math]::Round([BitConverter]::ToDouble($buf, $v + $V_POS), 1)
+                        worldZ        = [math]::Round([BitConverter]::ToDouble($buf, $v + $V_POS + 16), 1)
                         lastLapMs     = Seconds-ToMs $lastLap
                         fastestLapMs  = Seconds-ToMs $bestLap
                         speedKmh      = $speedKmh
@@ -367,6 +386,8 @@ while ($true) {
                         bestSector3Ms = Seconds-ToMs $bestSector3
                         causedYellow  = $false
                         lapInvalidated = $lapInvalid
+                        lastImpactEt  = $lastImpactEt
+                        lastImpactMag = $lastImpactMag
                         pitStops      = [int][BitConverter]::ToInt16($buf, $v + $V_NUM_PITSTOPS)
                         penalties     = [int][BitConverter]::ToInt16($buf, $v + $V_NUM_PENALTIES)
                         fuelL         = $fuelL
@@ -387,12 +408,16 @@ while ($true) {
                         state            = [int]$sessionState
                         label            = $SESSION_LABELS[[int]$sessionState]
                         timeRemainingSec = [int]$timeRemaining
+                        eventTime        = [math]::Round([BitConverter]::ToDouble($buf, $SCORING + $SC_CURRENT_ET), 2)
                         lapsInEvent      = if ($maxLaps -gt 0 -and $maxLaps -lt 100000) { $maxLaps } else { 0 }
                         scOut            = ($gamePhase -eq 6)
                         sectorFlags      = @([int]$buf[$SCORING + $SC_SECTOR_FLAGS], [int]$buf[$SCORING + $SC_SECTOR_FLAGS + 1], [int]$buf[$SCORING + $SC_SECTOR_FLAGS + 2])
                         trackLocation    = $trackName
                         trackVariation   = ""
                         trackLength      = [math]::Round($trackLength, 1)
+                        ambientTempC     = [math]::Round([BitConverter]::ToDouble($buf, $SCORING + $SC_AMBIENT_TEMP), 1)
+                        trackTempC       = [math]::Round([BitConverter]::ToDouble($buf, $SCORING + $SC_TRACK_TEMP), 1)
+                        rain             = [math]::Round([BitConverter]::ToDouble($buf, $SCORING + $SC_RAINING), 2)
                     }
                     standings = @($standings | Sort-Object position)
                 }

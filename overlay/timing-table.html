@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>Tabela de Tempos</title>
+  <link rel="stylesheet" href="shared/racecontrol.css" />
   <link rel="stylesheet" href="timing-table.css" />
 </head>
 <body>
@@ -20,10 +21,23 @@
       <span class="col right" id="rightColumnLabel">Intervalo</span>
     </div>
     <div id="rows"></div>
+    <!-- clima no rodape (AMS2 e LMU): icones em assets/weather/ (track_temp.png,
+         air_temp.png, rain.png); sem o icone, aparece o nome -->
+    <div class="weather-bar" id="weatherBar" hidden>
+      <div class="wb"><img class="wb-icon" id="wbIcTrack" alt="" /><span class="wb-l">PISTA</span><span class="wb-v" id="wbTrack">—</span></div>
+      <div class="wb"><img class="wb-icon" id="wbIcAir" alt="" /><span class="wb-l">AR</span><span class="wb-v" id="wbAir">—</span></div>
+      <div class="wb"><img class="wb-icon" id="wbIcRain" alt="" /><span class="wb-l">CHUVA</span><span class="wb-v" id="wbRain">—</span></div>
+    </div>
   </div>
   <!-- pista: etiqueta ao lado da tabela, na altura da primeira linha do cabecalho -->
   <div id="trackTag" class="tb-track no-track"><span class="tb-line1" id="trackName"></span><span class="tb-line2 tb-country"><img id="trackFlag" class="tb-flag" alt="" style="display:none" /><span id="trackLayout"></span></span></div>
 
+  <!-- safety car / FCY: o painel grande cobre a tabela por alguns segundos e a
+       etiqueta pequena fica ao lado da pista enquanto durar -->
+  <div id="rcPanel" hidden><div class="rcp-head"><span>RACE<br />CONTROL</span></div><div class="rcp-body" id="rcPanelText"></div></div>
+  <div id="rcTag" hidden><div class="rct-head">RACE CONTROL</div><div class="rct-body" id="rcTagText"></div></div>
+
+  <script src="shared/racecontrol.js"></script>
   <script src="shared/names.js"></script>
   <script src="shared/gaps.js"></script>
   <script src="shared/colors.js"></script>

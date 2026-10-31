@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Direção de Prova</title>
+  <link rel="stylesheet" href="direcao.css" />
+</head>
+<body>
+  <!-- senha da aba LMU (a mesma do painel) -->
+  <div id="login">
+    <div class="login-card">
+      <div class="login-title">Direção de prova</div>
+      <input id="pass" type="password" placeholder="Senha" autofocus />
+      <button id="loginBtn">Entrar</button>
+      <div id="loginError" class="login-error"></div>
+    </div>
+  </div>
+
+  <div id="rc" hidden>
+    <div class="rc-title">
+      <div class="rc-brand">DIREÇÃO DE PROVA</div>
+      <div id="rcTrack" class="rc-track"></div>
+      <div id="rcFlag" class="rc-flag">VERDE</div>
+      <div id="rcClock" class="rc-clock"></div>
+    </div>
+
+    <div class="rc-tools">
+      <button id="fcyBtn" class="tool fcy">FCY</button>
+      <button id="scBtn" class="tool sc">SAFETY CAR</button>
+      <button id="waveBtn" class="tool wave" disabled>RETARDATÁRIOS PODEM ULTRAPASSAR</button>
+      <button id="liveBtn" class="tool live" hidden>VOLTAR AO VIVO</button>
+      <span id="toolStatus" class="tool-status"></span>
+      <button id="soundBtn" class="tool sound" title="Bipe e notificação do Windows quando um carro fica lento">AVISOS: LIGADOS</button>
+      <button id="logoutBtn" class="tool logout">SAIR</button>
+    </div>
+
+    <div class="rc-body">
+      <div class="rc-table">
+        <div class="rc-row rc-head">
+          <div class="c-pos">POS</div>
+          <div class="c-cls">CLS</div>
+          <div class="c-name">PILOTO</div>
+          <div class="c-logo"></div>
+          <div class="c-team">EQUIPE / CARRO</div>
+          <div class="c-speed">KM/H</div>
+          <div class="c-state">SITUAÇÃO</div>
+        </div>
+        <div id="rows"></div>
+      </div>
+      <div class="rc-log">
+        <div class="rc-log-head">INFRAÇÕES: FCY/SC E CARRO PARADO</div>
+        <div id="log" class="log-list"></div>
+      </div>
+      <div class="rc-log">
+        <div class="rc-log-head">INCIDENTES DO JOGO</div>
+        <div id="gameLog" class="log-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- avisos de carro lento (canto da tela) -->
+  <div id="toasts"></div>
+
+  <script src="/overlay/shared/names.js"></script>
+  <script src="/overlay/shared/colors.js"></script>
+  <script src="/overlay/shared/logos.js"></script>
+  <script src="/overlay/shared/groups.js"></script>
+  <script src="/overlay/shared/display.js"></script>
+  <script src="/overlay/drivers-config.js"></script>
+  <script src="/overlay/track-names.js"></script>
+  <script src="direcao.js"></script>
+</body>
+</html>

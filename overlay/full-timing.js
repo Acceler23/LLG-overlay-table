@@ -175,7 +175,7 @@ function gapText(entry, ref, kind) {
 function renderHeader() {
   const root = document.getElementById("full-timing");
   if (typeof HEADER_COLOR !== "undefined" && HEADER_COLOR) root.style.setProperty("--header-color", HEADER_COLOR);
-  root.classList.toggle("sc-out", !!(session && session.scOut));
+  root.classList.toggle("sc-out", !!(session && (session.scOut || session.fcy)));
 
   let title = typeof HEADER_TITLE !== "undefined" && HEADER_TITLE ? HEADER_TITLE : "Liga Let's Go";
   let subtitle = "";
@@ -213,6 +213,9 @@ function renderHeader() {
   else if (laps > 0) {
     const lap = leader ? leader.currentLap || 0 : 0;
     timer = lap >= laps ? "ÚLTIMA VOLTA" : `VOLTA ${lap}/${laps}`;
+  } else if (session && session.lapsLeft != null) {
+    // corrida por tempo com o relogio zerado: as voltas que o lider ainda faz (servidor)
+    timer = session.lapsLeft <= 1 ? "ÚLTIMA VOLTA" : `+${session.lapsLeft} VOLTAS`;
   } else timer = formatClock(Number(session && session.timeRemainingSec) || 0);
   document.getElementById("ftTimer").textContent = timer;
 }
@@ -257,14 +260,11 @@ function setGain(el, diff) {
 
 // Aviso de punicao pendente ao lado do nome: DT (drive-through) ou SG (stop &
 // go) no AMS2; no LMU o jogo so informa quantas ha (PEN, ou PEN x2).
-const PENALTY_SHORT = { driveThrough: "DT", stopGo: "SG" };
 const PENALTY_NAMES = { driveThrough: "Drive-through", stopGo: "Stop & go" };
 function setPenaltyBadge(row, entry) {
   const badge = row.querySelector(".pen-badge");
   if (!badge) return;
-  let text = "";
-  if (entry.penaltyType && PENALTY_SHORT[entry.penaltyType]) text = PENALTY_SHORT[entry.penaltyType];
-  else if (entry.penalties > 0) text = entry.penalties > 1 ? `PEN x${entry.penalties}` : "PEN";
+  const text = LLGDisplay.penaltyLabel(entry);
   badge.textContent = text;
   badge.hidden = !text || isDnf(entry);
 }
@@ -297,8 +297,10 @@ function renderNow() {
     renderQuali();
     return;
   }
-  document.getElementById("ftSessionLabel").textContent = "CORRIDA";
-  const race = state === 5;
+  // volta de formacao: mesma tabela da corrida (o grid ja esta formado)
+  const formation = state === 4;
+  document.getElementById("ftSessionLabel").textContent = formation ? "FORMAÇÃO" : session && session.fcy ? (session.fcyGreenIn > 0 ? `VERDE EM ${session.fcyGreenIn}` : session.fcyCountdown > 0 ? `FCY EM ${session.fcyCountdown}` : "FCY") : session && (session.scCall || session.scOut) ? "SAFETY CAR" : "CORRIDA"; // FCY e SC: chamados no painel (aba LMU)
+  const race = state === 5 || formation;
   if (!race || !standings.length) {
     root.classList.add("hidden");
     return;
@@ -347,6 +349,7 @@ function renderNow() {
     row.classList.toggle("dnf", dnf);
     row.classList.toggle("player", !!entry.isPlayer && !dnf); // piloto assistido
     row.classList.toggle("battle", !dnf && battleNames.has(entry.name)); // em disputa
+    row.classList.toggle("yellow", !dnf && !!entry.causedYellow); // causou a bandeira amarela
 
     row.querySelector(".c-pos").textContent = dnf ? "-" : String(idx + 1); // ordem da tabela (DNF no fim)
     const clsCell = row.querySelector(".c-cls");
@@ -375,6 +378,10 @@ function renderNow() {
     if (dnf) {
       leaderCell.innerHTML = `<span class="t-dnf">DNF</span>`;
       aheadCell.textContent = "";
+    } else if (formation) {
+      // ninguem completou volta: diferencas ainda nao dizem nada
+      leaderCell.textContent = "";
+      aheadCell.textContent = "";
     } else {
       leaderCell.textContent = gapText(entry, leader, "leader");
       aheadCell.textContent = ahead ? gapText(entry, ahead, "ahead") : "";
@@ -393,8 +400,9 @@ function renderNow() {
     const gainCls = row.querySelector(".g-cls");
     const start = entry.startPosition;
     const classStart = multiClass ? grouper.startPosition(entry, ordered) : null;
-    setGain(gainAll, dnf || start == null ? null : start - (idx + 1));
-    setGain(gainCls, dnf || classStart == null ? null : classStart - (grouper.position(entry, ordered) || classStart));
+    const noGain = dnf || formation; // na formacao a largada ainda nao aconteceu
+    setGain(gainAll, noGain || start == null ? null : start - (idx + 1));
+    setGain(gainCls, noGain || classStart == null ? null : classStart - (grouper.position(entry, ordered) || classStart));
 
     const stint = row.querySelector(".c-stint");
     if (!dnf && inPit(entry)) stint.innerHTML = `<span class="t-box">BOX</span>`;
@@ -814,6 +822,15 @@ function logItem(ev) {
     cls = "lg-yellow";
     type = "Safety car";
     body = line("", "", "Bandeira amarela em toda a pista", "");
+  } else if (ev.type === "fcy") {
+    cls = "lg-yellow";
+    type = "FCY";
+    body = line("", "", "Full course yellow", "");
+  } else if (ev.type === "fcyBreach") {
+    cls = "lg-yellow";
+    type = "FCY queimado";
+    const secs = (ms) => `${(Math.max(0, ms) / 1000).toFixed(1).replace(".", ",")} s`;
+    body = line("", "", nameOf(ev.driver), `máx ${ev.maxKmh} km/h`) + line("", "", `${secs(ev.overMs)} acima do limite`, `${secs(ev.afterMs)} após a contagem`);
   } else if (ev.type === "green") {
     cls = "lg-green";
     type = "Bandeira verde";
@@ -858,7 +875,7 @@ const battleDetector = LLGBattles.createBattleDetector();
 let battleNames = new Set();
 
 function updateBattles() {
-  if (!(session && Number(session.state) === 5) || session.scOut) {
+  if (!(session && Number(session.state) === 5) || session.scOut || session.fcy) {
     battleDetector.reset();
     battleNames = new Set();
     return;

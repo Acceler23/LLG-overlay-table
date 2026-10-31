@@ -22,6 +22,19 @@
     .tab-page { display: none; padding-top: 12px; }
     .badge { display: inline-block; min-width: 18px; padding: 1px 6px; margin-left: 4px; border-radius: 9px; background: #ff5a5a; color: #fff; font-size: 11px; }
     .tab-page.active { display: block; }
+    #scBtn { width: 100%; padding: 16px; margin-top: 8px; font-size: 18px; font-weight: 800; letter-spacing: 1px; border: none; border-radius: 8px; background: #ff8c1a; color: #111; }
+    #scBtn.on { background: #1f9d55; color: #fff; }
+    #scBtn:disabled { opacity: 0.6; cursor: wait; }
+    #waveBtn { width: 100%; padding: 12px; margin-top: 8px; font-size: 15px; font-weight: 800; border: none; border-radius: 8px; background: #3a7bd5; color: #fff; }
+    #waveBtn:disabled { opacity: 0.5; cursor: default; }
+    #fcyBtn { width: 100%; padding: 22px; font-size: 22px; font-weight: 800; letter-spacing: 1px; border: none; border-radius: 8px; background: #e6b800; color: #111; }
+    #fcyBtn.on { background: #1f9d55; color: #fff; }
+    #fcyBtn:disabled { opacity: 0.6; cursor: wait; }
+    #fcyBreaches { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+    #fcyBreaches th { text-align: left; color: #888; font-size: 11px; font-weight: 700; padding: 4px 6px; border-bottom: 1px solid #333; }
+    #fcyBreaches td { padding: 5px 6px; border-bottom: 1px solid #262626; }
+    #fcyBreaches td.n { text-align: right; font-variant-numeric: tabular-nums; }
+    #fcyBreaches tr.live td { color: #ffd400; }
     #firstRun { position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, 0.85); align-items: center; justify-content: center; padding: 16px; }
     .first-run-card { background: #1a1a1a; border: 1px solid #444; border-radius: 8px; padding: 20px; max-width: 460px; width: 100%; }
   </style>
@@ -63,6 +76,7 @@
     <button class="tab" data-tab="pilotos" onclick="showTab('pilotos')">Pilotos <span id="linksBadge" class="badge" hidden></span></button>
     <button class="tab" data-tab="ams2" onclick="showTab('ams2')">AMS2</button>
     <button class="tab" data-tab="acc" onclick="showTab('acc')">ACC</button>
+    <button class="tab" data-tab="lmu" onclick="showTab('lmu')">LMU</button>
     <button class="tab" data-tab="config" onclick="showTab('config')">Configuração</button>
   </div>
 
@@ -133,7 +147,17 @@
         <input id="linkCard" type="text" readonly onclick="this.select()" />
         <button onclick="copyLink('linkCard')">Copiar</button>
       </div>
-      <div class="muted">Tamanhos sugeridos da fonte: tabela 880×1080 (a tabela tem 500 de largura; à direita dela ficam a pista, a volta rápida e, no LMU, pneus e VE), driver card 560×210 (os 50 de cima são o espaço para a foto do piloto sair do cartão).</div>
+      <div class="row">
+        <label class="muted" style="min-width:90px" title="Mapa da pista com os carros.">Mapa da pista</label>
+        <input id="linkMap" type="text" readonly onclick="this.select()" />
+        <button onclick="copyLink('linkMap')">Copiar</button>
+      </div>
+      <div class="row wrap">
+        <button onclick="forgetTrackMap()" title="Apaga o mapa salvo da pista atual e aprende de novo com os carros na pista (pista alterada ou mapa estranho).">Aprender o mapa desta pista de novo</button>
+        <span class="muted" id="mapStatus"></span>
+      </div>
+      <div class="muted">O mapa é aprendido sozinho com os carros na pista (uns 2 minutos de sessão) e fica salvo: da próxima vez já aparece. O clima (pista, ar, chuva) aparece no rodapé da tabela; ícones: weather/track_temp.png, weather/air_temp.png e weather/rain.png na pasta de imagens.</div>
+      <div class="muted">Tamanhos sugeridos da fonte: mapa 420×400, tabela 880×1080 (a tabela tem 500 de largura; à direita dela ficam a pista, a volta rápida e, no LMU, pneus e VE), driver card 560×210 (os 50 de cima são o espaço para a foto do piloto sair do cartão).</div>
     </div>
 
     <h3>Durante a corrida</h3>
@@ -232,6 +256,11 @@
         <span id="opRowsVal" class="muted" style="min-width:36px">100%</span>
       </div>
       <div class="row">
+        <label class="muted" style="min-width:140px">Opacidade do mapa</label>
+        <input id="opMap" type="range" min="0" max="100" value="100" oninput="setOpacity('map', this.value)" />
+        <span id="opMapVal" class="muted" style="min-width:36px">100%</span>
+      </div>
+      <div class="row">
         <label class="muted" style="min-width:140px" title="Degradê com a cor principal da equipe (RLT) em cada linha da tabela. 0% desliga.">Cor da equipe</label>
         <input id="teamTint" type="range" min="0" max="100" value="50" oninput="setTeamTint(this.value)" />
         <span id="teamTintVal" class="muted" style="min-width:36px">50%</span>
@@ -325,6 +354,85 @@
         <input id="accStintMin" type="number" min="1" max="600" step="1" value="35" style="max-width:110px" onchange="setAccStint()" />
       </div>
       <div class="muted" id="accStintStatus"></div>
+    </div>
+  </section>
+
+  <!-- ================================ LMU ================================ -->
+  <section class="tab-page" data-tab="lmu">
+    <div class="muted">Direção de prova no Le Mans Ultimate. As mensagens vão para o chat do jogo com o nome da conta do LMU aberta neste computador, e todos na sessão veem.</div>
+
+    <h3>FCY e Safety Car de outro PC (pelo chat) · sem senha</h3>
+    <div class="box">
+      <div class="muted">Para quem transmite sem ser a direção de prova: esta opção não precisa de senha. O app lê o chat do LMU e liga ou desliga o FCY e o Safety Car na tabela quando aparecem as mensagens deles, mandadas por qualquer um (o texto padrão das mensagens já é igual nos dois PCs). A contagem do FCY vem da própria mensagem. O LMU precisa estar aberto e na sessão.</div>
+      <div class="row"><label><input id="lmuFollow" type="checkbox" style="width:auto" onchange="lmuSaveFollow()" /> Seguir o FCY e o Safety Car mandados no chat</label></div>
+      <div class="muted" id="lmuFcyNow"></div>
+    </div>
+
+    <div id="lmuLocked" class="box">
+      <div class="muted" id="lmuLockHint">Digite a senha da aba.</div>
+      <div class="row">
+        <input id="lmuPass" type="password" placeholder="Senha" onkeydown="if (event.key === 'Enter') lmuUnlock()" />
+        <button id="lmuUnlockBtn" onclick="lmuUnlock()">Desbloquear</button>
+      </div>
+      <div class="muted" id="lmuLockStatus"></div>
+    </div>
+
+    <div id="lmuUnlocked" hidden>
+      <h3>FCY e Safety Car</h3>
+      <div class="box">
+        <button id="fcyBtn" onclick="lmuToggleFcy()">FCY</button>
+        <button id="scBtn" onclick="lmuToggleSc()">SAFETY CAR</button>
+        <button id="waveBtn" onclick="lmuWaveBy()" disabled>RETARDATÁRIOS PODEM ULTRAPASSAR</button>
+        <div class="row">
+          <label class="muted" style="min-width:110px">Carro do SC</label>
+          <select id="lmuScCar" onchange="lmuSetScCar()"></select>
+        </div>
+        <div class="muted" id="lmuScCarHint"></div>
+        <div class="muted" id="waveStatus"></div>
+        <div class="muted" id="fcyStatus"></div>
+        <div class="muted">Com o FCY ou o Safety Car ligado, as tabelas ficam amarelas com "FCY" ou "SAFETY CAR" no cabeçalho e o log da sessão registra o início e o fim. Ligar um desliga o outro (sem mandar a bandeira verde). Numa sessão nova, os dois voltam a ficar desligados.</div>
+      </div>
+
+      <h3>Direção de prova</h3>
+      <div class="box">
+        <div class="muted">Tela no estilo da tabela completa, com todos os carros: velocidade agora, situação (box, lento, acima de 60 no FCY, carro do SC), quantas vezes cada um ficou lento, queimou o FCY ou ultrapassou com SC/FCY, e o log dos incidentes ao lado. Tem os mesmos botões de FCY, Safety Car e retardatários. Abre no navegador, já desbloqueada.</div>
+        <div class="muted">Carro lento: abaixo de 40 km/h, ou abaixo de 60 km/h por mais de 3 s, fora do box, com pista verde. Ultrapassagem com SC/FCY: ordem na pista trocada e mantida por 1,5 s, fora do box.</div>
+        <button onclick="lmuOpenDirecao()">Abrir direção de prova</button>
+      </div>
+
+      <h3>Quem queimou o FCY</h3>
+      <div class="box">
+        <div class="muted">Acima de 60 km/h depois do fim da contagem. Cada trecho acima do limite é uma linha: quanto tempo ficou acima, quanto tempo depois do fim da contagem começou e a velocidade máxima. Em amarelo: acima do limite agora. A lista vale para a sessão inteira e também entra no log.</div>
+        <table id="fcyBreaches">
+          <thead><tr><th>FCY</th><th>Piloto</th><th class="n">Acima por</th><th class="n">Após a contagem</th><th class="n">Máx.</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <div class="muted" id="fcyNoBreach">Ninguém queimou o FCY nesta sessão.</div>
+      </div>
+
+      <h3>Mensagens</h3>
+      <div class="box">
+        <div class="row"><label class="muted" style="min-width:110px">FCY</label><input id="lmuMsgOn" maxlength="200" onchange="lmuSaveMessages()" /></div>
+        <div class="row"><label class="muted" style="min-width:110px">Contagem FCY</label><input id="lmuMsgFcyTick" maxlength="200" onchange="lmuSaveMessages()" /></div>
+        <div class="row"><label class="muted" style="min-width:110px">Verde em</label><input id="lmuMsgEnding" maxlength="200" onchange="lmuSaveMessages()" /></div>
+        <div class="row"><label class="muted" style="min-width:110px">Contagem verde</label><input id="lmuMsgGreenTick" maxlength="200" onchange="lmuSaveMessages()" /></div>
+        <div class="row"><label class="muted" style="min-width:110px">Fim do FCY</label><input id="lmuMsgOff" maxlength="200" onchange="lmuSaveMessages()" /></div>
+        <div class="row"><label class="muted" style="min-width:110px">Contagem da verde (s)</label><input id="lmuGreen" type="number" min="0" max="60" step="1" style="max-width:110px" onchange="lmuSaveMessages()" /></div>
+        <div class="muted">Ao encerrar o FCY: manda "Verde em" ({s} vira os segundos), conta no chat e só no fim manda "Fim do FCY" e desliga o FCY. Até lá o limite de 60 km/h continua valendo. Apertar o botão de novo durante essa contagem encerra na hora. 0: encerra direto.</div>
+        <div class="row"><label class="muted" style="min-width:110px">Contagem do FCY (s)</label><input id="lmuCountdown" type="number" min="0" max="60" step="1" style="max-width:110px" onchange="lmuSaveMessages()" /></div>
+        <div class="muted">Segundos para os pilotos reduzirem depois de apertar o FCY; só depois disso os 60 km/h passam a valer. Na mensagem, {s} vira esse número, e a contagem no chat ("Contagem FCY" / "Contagem verde") manda só os últimos 10 s (com 20 s: FCY EM 20S, pausa de 10 s, FCY 10S, FCY 9S, ...). Sem {s} nelas, a contagem manda só os números.</div>
+        <div class="row"><label><input id="lmuChatCountdown" type="checkbox" style="width:auto" onchange="lmuSaveMessages()" /> Mandar a contagem no chat (uma mensagem por segundo)</label></div>
+        <div class="row"><label class="muted" style="min-width:110px">Fim da contagem</label><input id="lmuMsgGo" maxlength="200" onchange="lmuSaveMessages()" /></div>
+        <div class="muted">Mandada quando a contagem acaba e o limite passa a valer. O app de outro PC que segue o chat acerta o fim da contagem por ela.</div>
+        <div class="row"><label class="muted" style="min-width:110px">Safety Car</label><input id="lmuMsgScOn" maxlength="200" onchange="lmuSaveMessages()" /></div>
+        <div class="row"><label class="muted" style="min-width:110px">Depois do SC</label><input id="lmuMsgScCatch" maxlength="200" onchange="lmuSaveMessages()" /></div>
+        <div class="row"><label class="muted" style="min-width:110px">Fim do SC</label><input id="lmuMsgScOff" maxlength="200" onchange="lmuSaveMessages()" /></div>
+        <div class="row"><label class="muted" style="min-width:110px">Retardatários</label><input id="lmuMsgScWave" maxlength="200" onchange="lmuSaveMessages()" /></div>
+        <div class="row"><label class="muted" style="min-width:110px">Cada piloto</label><input id="lmuMsgScWaveDriver" maxlength="200" onchange="lmuSaveMessages()" /></div>
+        <div class="muted">"Retardatários": manda o aviso e, 10 s depois, uma mensagem para cada retardatário na fila do SC ({nome} vira o nome do piloto). Retardatário na fila: pelo menos uma volta atrás do líder e na frente dele na pista, entre o SC e o líder; quem está no box não entra.</div>
+      </div>
+
+      <button onclick="lmuLock()">Bloquear a aba</button>
     </div>
   </section>
 

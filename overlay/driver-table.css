@@ -192,3 +192,12 @@ html, body {
 .dt-val .down { color: #ff5a5a; font-weight: 700; }
 .dt-val.pit { color: #5eb8ff; font-weight: 700; }
 .dt-val.dnf { color: #ff6b6b; font-weight: 700; }
+
+/* safety car / FCY: tamanhos para a largura da tabela do piloto; a etiqueta e uma
+   faixa logo abaixo do titulo (a animacao esta em shared/racecontrol.css) */
+#rcPanel { position: fixed; }
+#rcPanel .rcp-body { padding: 8px; font-size: 74px; }
+#rcPanel.rc-fcy .rcp-body { font-size: 62px; }
+#rcPanel.rc-long .rcp-body { font-size: 58px; }
+#rcTag { position: static; flex-direction: row; width: 100%; height: 26px; min-width: 0; }
+#rcTag .rct-body { padding: 0 8px; font-size: 13px; border-radius: 0; }
