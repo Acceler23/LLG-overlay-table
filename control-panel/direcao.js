@@ -101,8 +101,8 @@ document.getElementById("fcyBtn").addEventListener("click", () => {
   tool("/api/lmu/fcy", { on }, on ? "FCY ligado." : control && control.greenLeft > 0 ? "FCY encerrado." : "Contagem da bandeira verde.");
 });
 document.getElementById("scBtn").addEventListener("click", () => {
-  const on = !(control && control.sc);
-  tool("/api/lmu/sc", { on }, on ? "Safety Car ligado." : "Safety Car encerrado.");
+  const on = !(control && (control.sc || control.scIn));
+  tool("/api/lmu/sc", { on }, on ? "Safety Car ligado." : control && control.scIn ? "Bandeira verde." : "SC nessa volta: verde quando o líder abrir a volta.");
 });
 // sair: esquece o acesso (no painel tambem, e o mesmo)
 document.getElementById("logoutBtn").addEventListener("click", async () => {
@@ -116,10 +116,10 @@ function showControl(st) {
   notifyNewSlow(st);
   const fcyBtn = document.getElementById("fcyBtn");
   fcyBtn.classList.toggle("on", !!st.fcy);
-  fcyBtn.textContent = !st.fcy ? "FCY" : st.greenLeft > 0 ? `VERDE EM ${st.greenLeft} · ENCERRAR JÁ` : "ENCERRAR FCY";
+  fcyBtn.textContent = !st.fcy ? "FCY" : st.greenLeft > 0 ? `${st.greenLeft}S PARA VERDE · ENCERRAR JÁ` : "ENCERRAR FCY";
   const scBtn = document.getElementById("scBtn");
-  scBtn.classList.toggle("on", !!st.sc);
-  scBtn.textContent = st.sc ? "ENCERRAR SAFETY CAR" : "SAFETY CAR";
+  scBtn.classList.toggle("on", !!(st.sc || st.scIn));
+  scBtn.textContent = st.scIn ? "SC NESSA VOLTA · BANDEIRA VERDE AGORA" : st.sc ? "ENCERRAR SAFETY CAR" : "SAFETY CAR";
   document.getElementById("waveBtn").disabled = !st.sc || st.waveLeft > 0;
   document.getElementById("liveBtn").hidden = !st.replayActive;
   queueRender();
@@ -195,7 +195,10 @@ function renderHeader(st) {
   let cls = "";
   if (st && st.fcy) {
     cls = "fcy";
-    text = st.greenLeft > 0 ? `VERDE EM ${st.greenLeft}` : st.countdownLeft > 0 ? `FCY EM ${st.countdownLeft}` : "FCY";
+    text = st.greenLeft > 0 ? `${st.greenLeft}S PARA VERDE` : st.countdownLeft > 0 ? `FCY EM ${st.countdownLeft}` : "FCY";
+  } else if (st && st.scIn) {
+    cls = "sc";
+    text = "SC NESSA VOLTA";
   } else if ((st && st.sc) || session.scOut) {
     cls = "sc";
     text = "SAFETY CAR";
@@ -268,14 +271,14 @@ function renderRows(st) {
     const v = speedOf(e);
     const speed = cell(row, "c-speed");
     speed.textContent = v == null || dnf ? "" : String(Math.round(v));
-    speed.className = "c-speed" + (!dnf && !pit && !isSc && v != null ? (fcyLive && v > 60 ? " speed-high" : green && v < 60 ? " speed-low" : "") : "");
+    speed.className = "c-speed" + (!dnf && !pit && !isSc && v != null ? (fcyLive && v > ((st && st.breachKmh) || 62) ? " speed-high" : green && v < 60 ? " speed-low" : "") : "");
 
     const tags = [];
     if (isSc) tags.push(["sccar", "SAFETY CAR"]);
     if (dnf) tags.push(["dnf", "FORA"]);
     else if (pit) tags.push(["box", "BOX"]);
     if (slowNow) tags.push(["slow", `LENTO ${secs(slowNow.durationMs)}`]);
-    if (overNow) tags.push(["over", `ACIMA DE 60 · ${secs(overNow.overMs)}`]);
+    if (overNow) tags.push(["over", `ACIMA DO LIMITE · ${secs(overNow.overMs)}`]);
     const state = cell(row, "c-state");
     const html = tags.map(([c, txt]) => `<span class="tag ${c}">${txt}</span>`).join("");
     if (state.innerHTML !== html) state.innerHTML = html;
@@ -300,7 +303,7 @@ function renderLog(st) {
         et: b.et,
         cls: "fcy" + (b.live ? " live" : ""),
         type: `FCY ${b.fcy} queimado${b.live ? " (agora)" : ""}`,
-        lines: [[driver(b.carNumber, b.name), `máx ${Math.round(b.maxKmh)} km/h`], [`${secs(b.overMs)} acima de 60`, `${secs(b.afterMs)} após a contagem`]],
+        lines: [[driver(b.carNumber, b.name), `máx ${Math.round(b.maxKmh)} km/h`], [`${secs(b.overMs)} acima do limite`, `${secs(b.afterMs)} após a contagem`]],
       })),
       inc.overtakes.map((o) => ({
         at: o.at,

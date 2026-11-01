@@ -259,7 +259,7 @@ function createSessionLog(opts) {
     const sc = !!session.scOut;
     if (scOut !== null && sc !== scOut && (sc || !session.fcy)) push(t, leader, { type: sc ? "safetyCar" : "green" });
     scOut = sc;
-    // FCY queimado (acima de 60 km/h depois da contagem): server/raceControl.js.
+    // FCY queimado (acima de 62 km/h depois da contagem): server/raceControl.js.
     // Antes da bandeira verde: quem ainda estava acima fecha quando o FCY acaba.
     (session.fcyBreaches || []).forEach((b) => {
       const e = list.find((x) => x.name === b.name) || leader;

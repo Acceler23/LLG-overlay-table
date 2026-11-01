@@ -339,7 +339,7 @@ const lmuApi = (path, body) => {
 function showLmuControl(st) {
   if (st.unlocked === false) setLmuToken(""); // acesso esquecido (bloqueado): pede a senha de novo
   lmuFcyOn = !!st.fcy;
-  lmuScOn = !!st.sc;
+  lmuScOn = !!(st.sc || st.scIn);
   const by = (who) => (who && who !== "painel" ? ` (mandado no chat por ${who})` : "");
   document.getElementById("lmuFcyNow").textContent = st.fcy ? `FCY ligado agora${by(st.fcyBy)}.` : st.sc ? `Safety Car ligado agora${by(st.scBy)}.` : "";
   if (st.follow) document.getElementById("lmuFollow").checked = !!st.follow.enabled;
@@ -349,10 +349,10 @@ function showLmuControl(st) {
   if (!unlocked) return;
   const btn = document.getElementById("fcyBtn");
   btn.classList.toggle("on", !!st.fcy);
-  btn.textContent = !st.fcy ? "FCY" : st.greenLeft > 0 ? `VERDE EM ${st.greenLeft} · ENCERRAR JÁ` : "ENCERRAR FCY";
+  btn.textContent = !st.fcy ? "FCY" : st.greenLeft > 0 ? `${st.greenLeft}S PARA VERDE · ENCERRAR JÁ` : "ENCERRAR FCY";
   const scBtn = document.getElementById("scBtn");
-  scBtn.classList.toggle("on", !!st.sc);
-  scBtn.textContent = st.sc ? "ENCERRAR SAFETY CAR" : "SAFETY CAR";
+  scBtn.classList.toggle("on", !!(st.sc || st.scIn));
+  scBtn.textContent = st.scIn ? "SC NESSA VOLTA · BANDEIRA VERDE AGORA" : st.sc ? "ENCERRAR SAFETY CAR" : "SAFETY CAR";
   document.getElementById("waveBtn").disabled = !st.sc || st.waveLeft > 0;
   if (st.scCar) showScCar(st.scCar);
   document.getElementById("waveStatus").textContent =
@@ -367,6 +367,8 @@ function showLmuControl(st) {
   showFcyBreaches(st.breaches || []);
   const cd = document.getElementById("lmuCountdown");
   if (st.countdownSec != null && document.activeElement !== cd) cd.value = st.countdownSec;
+  const chatLag = document.getElementById("lmuChatLag");
+  if (st.chatLagSec != null && document.activeElement !== chatLag) chatLag.value = st.chatLagSec;
   const green = document.getElementById("lmuGreen");
   if (st.greenSec != null && document.activeElement !== green) green.value = st.greenSec;
   if (st.chatCountdown != null) document.getElementById("lmuChatCountdown").checked = !!st.chatCountdown;
@@ -423,6 +425,37 @@ async function lmuSaveFollow() {
     log("ERRO seguir chat: " + e.message);
   }
 }
+
+// ---- audios da contagem e dos avisos: vale so para este PC
+function showVoice(st) {
+  document.getElementById("voiceOn").checked = !!st.on;
+  const vol = document.getElementById("voiceVolume");
+  if (document.activeElement !== vol) vol.value = st.volume;
+  document.getElementById("voiceStatus").textContent = st.failed ? "Não foi possível iniciar os áudios." : "";
+}
+
+async function saveVoice() {
+  try {
+    showVoice(
+      await api("/api/voice", {
+        method: "POST",
+        body: JSON.stringify({ on: document.getElementById("voiceOn").checked, volume: Number(document.getElementById("voiceVolume").value) }),
+      })
+    );
+  } catch (e) {
+    log("ERRO voz: " + e.message);
+  }
+}
+
+async function testVoice() {
+  try {
+    showVoice(await api("/api/voice/test", { method: "POST", body: "{}" }));
+  } catch (e) {
+    log("ERRO voz: " + e.message);
+  }
+}
+
+api("/api/voice").then(showVoice).catch(() => {});
 
 async function lmuUnlock() {
   const input = document.getElementById("lmuPass");
@@ -537,6 +570,7 @@ async function lmuSaveMessages() {
         fcyTick: document.getElementById("lmuMsgFcyTick").value,
         greenTick: document.getElementById("lmuMsgGreenTick").value,
         greenSec: document.getElementById("lmuGreen").value,
+        chatLagSec: document.getElementById("lmuChatLag").value,
         scOn: document.getElementById("lmuMsgScOn").value,
         scOff: document.getElementById("lmuMsgScOff").value,
         scCatch: document.getElementById("lmuMsgScCatch").value,

@@ -176,6 +176,7 @@ function renderHeader() {
   const root = document.getElementById("full-timing");
   if (typeof HEADER_COLOR !== "undefined" && HEADER_COLOR) root.style.setProperty("--header-color", HEADER_COLOR);
   root.classList.toggle("sc-out", !!(session && (session.scOut || session.fcy)));
+  root.classList.toggle("green-soon", !!(session && session.fcyGreenIn > 0)); // contagem da bandeira verde
 
   let title = typeof HEADER_TITLE !== "undefined" && HEADER_TITLE ? HEADER_TITLE : "Liga Let's Go";
   let subtitle = "";
@@ -299,7 +300,7 @@ function renderNow() {
   }
   // volta de formacao: mesma tabela da corrida (o grid ja esta formado)
   const formation = state === 4;
-  document.getElementById("ftSessionLabel").textContent = formation ? "FORMAÇÃO" : session && session.fcy ? (session.fcyGreenIn > 0 ? `VERDE EM ${session.fcyGreenIn}` : session.fcyCountdown > 0 ? `FCY EM ${session.fcyCountdown}` : "FCY") : session && (session.scCall || session.scOut) ? "SAFETY CAR" : "CORRIDA"; // FCY e SC: chamados no painel (aba LMU)
+  document.getElementById("ftSessionLabel").textContent = formation ? "FORMAÇÃO" : session && session.fcy ? (session.fcyGreenIn > 0 ? `${session.fcyGreenIn}S PARA VERDE` : session.fcyCountdown > 0 ? `FCY EM ${session.fcyCountdown}` : "FCY") : session && session.scIn ? "SC NESSA VOLTA" : session && (session.scCall || session.scOut) ? "SAFETY CAR" : "CORRIDA"; // FCY e SC: chamados no painel (aba LMU)
   const race = state === 5 || formation;
   if (!race || !standings.length) {
     root.classList.add("hidden");

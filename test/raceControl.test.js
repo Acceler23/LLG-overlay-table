@@ -7,6 +7,7 @@ const TEST_HASH = hashPassword("abcd");
 // sem contagem da bandeira verde, a nao ser nos testes dela (encerrar desliga na hora)
 const createRaceControl = (settings, opts = {}) => {
   if (settings.get("lmuGreenCountdown") === undefined) settings.set("lmuGreenCountdown", 0);
+  if (settings.get("lmuChatLag") === undefined) settings.set("lmuChatLag", 0); // sem esperar o chat, a nao ser nos testes dele
   return create(settings, Object.assign({ passwordHash: TEST_HASH }, opts));
 };
 
@@ -147,7 +148,7 @@ test("chat: reconhece as mensagens de FCY (com a contagem) e de safety car", () 
   assert.deepEqual(matchMessage("FCY EM 9s - 60kmh", DEFAULT_MESSAGES), { kind: "fcy", on: true, seconds: 9 });
   assert.deepEqual(matchMessage("FCY 7S", DEFAULT_MESSAGES), { kind: "fcy", on: true, seconds: 7 });
   assert.deepEqual(matchMessage("VERDE 4S", DEFAULT_MESSAGES), { kind: "fcy", ending: true, seconds: 4 });
-  assert.deepEqual(matchMessage("BANDEIRA VERDE EM 5 SEGUNDOS", DEFAULT_MESSAGES), { kind: "fcy", ending: true, seconds: 5 });
+  assert.deepEqual(matchMessage("5S PARA VERDE", DEFAULT_MESSAGES), { kind: "fcy", ending: true, seconds: 5 });
   assert.deepEqual(matchMessage("Safety Car na pista", DEFAULT_MESSAGES), { kind: "sc", on: true });
   assert.deepEqual(matchMessage("SAFETY CAR NESSA VOLTA - PREPARAR PARA RELARGADA", DEFAULT_MESSAGES), { kind: "sc", on: false });
   assert.equal(matchMessage("atencao galera ao chat FCY E SC", DEFAULT_MESSAGES), null);
@@ -200,8 +201,7 @@ test("seguir o chat: safety car de qualquer um liga e desliga; FCY virando SC de
   assert.deepEqual([p.session.scCall, p.session.scOut, p.session.fcy], [true, true, false]);
   say("R Junior: SAFETY CAR NESSA VOLTA - PREPARAR PARA RELARGADA");
   await rc.pollChat();
-  assert.equal(rc.status().sc, false);
-  assert.equal(lmu().session.scOut, undefined); // o SC do jogo continua valendo sozinho
+  assert.deepEqual([rc.status().sc, rc.status().scIn], [false, true]); // SC nessa volta
 });
 
 test("seguir o chat: desligado ou sem o LMU aberto, nao le", async () => {
@@ -292,7 +292,7 @@ test("bandeira verde: encerrar conta no chat e so desliga o FCY no fim (o limite
   await new Promise((r) => setTimeout(r, 2300));
   assert.equal(rc.status().fcy, false);
   assert.equal(rc.status().breaches.length, 1); // acima de 60 durante a contagem da verde
-  assert.deepEqual(sent, ["FCY EM 0S - 60KMH", "BANDEIRA VERDE EM 2 SEGUNDOS", "VERDE 1S", "BANDEIRA VERDE"]);
+  assert.deepEqual(sent, ["FCY EM 0S - 60KMH", "2S PARA VERDE", "VERDE 1S", "BANDEIRA VERDE"]);
 });
 
 test("bandeira verde: apertar de novo durante a contagem encerra na hora", async () => {
@@ -309,7 +309,7 @@ test("bandeira verde: apertar de novo durante a contagem encerra na hora", async
   await rc.setFcy(token, false);
   assert.equal(rc.status().fcy, false);
   await new Promise((r) => setTimeout(r, 50));
-  assert.deepEqual(sent.slice(1), ["BANDEIRA VERDE EM 5 SEGUNDOS", "BANDEIRA VERDE"]);
+  assert.deepEqual(sent.slice(1), ["5S PARA VERDE", "BANDEIRA VERDE"]);
 });
 
 test("seguir o chat: a contagem da verde aparece aqui e a mensagem de verde desliga", async () => {
@@ -318,7 +318,7 @@ test("seguir o chat: a contagem da verde aparece aqui e a mensagem de verde desl
   await rc.pollChat();
   say("R Junior: FCY EM 10S - 60KMH");
   await rc.pollChat();
-  say("R Junior: BANDEIRA VERDE EM 5 SEGUNDOS");
+  say("R Junior: 5S PARA VERDE");
   await rc.pollChat();
   assert.deepEqual([rc.status().fcy, rc.status().greenLeft], [true, 5]);
   say("R Junior: BANDEIRA VERDE");
@@ -462,7 +462,7 @@ test("seguir o chat: FCY Ns e VERDE Ns acertam as contagens daqui", async () => 
   assert.equal(rc.status().countdownLeft, 8);
   advance(9000);
   lmu();
-  say("R Junior: BANDEIRA VERDE EM 10 SEGUNDOS");
+  say("R Junior: 10S PARA VERDE");
   await rc.pollChat();
   advance(3000);
   lmu();
@@ -503,4 +503,219 @@ test("replay: bloqueado sem acesso; com o proprio carro andando nao entra", asyn
   assert.equal((await rc.replayJump(token, 100)).ok, true);
   assert.equal((await rc.replayJump(token, "x")).ok, false);
   assert.deepEqual(jumps, [100]);
+});
+
+test("FCY: margem de erro de 2 km/h, so queima acima de 62", async () => {
+  const settings = fakeSettings();
+  settings.set("lmuFcyCountdown", 0);
+  settings.set("lmuChatCountdown", false);
+  const rc = createRaceControl(settings, { sendChat: async () => {} });
+  const { token } = rc.unlock("abcd");
+  await rc.setFcy(token, true);
+  const send = (name, kmh) => rc.apply({ game: "lmu", session: { state: 5, trackLocation: "Spa" }, standings: [{ name, speedKmh: kmh, raceState: 2 }] });
+  send("Dentro do limite", 60);
+  send("Dentro da margem", 62);
+  assert.equal(rc.status().breaches.length, 0);
+  send("Acima da margem", 62.1);
+  assert.deepEqual(rc.status().breaches.map((b) => b.name), ["Acima da margem"]);
+  assert.equal(rc.status().breachKmh, 62);
+});
+
+test("seguir o chat: a mensagem do fim da contagem vale mesmo com o relogio daqui ja adiantado", async () => {
+  const { rc, say, lmu, advance } = followSetup();
+  lmu();
+  await rc.pollChat();
+  say("R Junior: FCY EM 3S - 60KMH");
+  await rc.pollChat();
+  advance(1000);
+  lmu();
+  say("R Junior: FCY - LIMITADOR DE BOX LIGADO");
+  await rc.pollChat();
+  assert.equal(rc.status().countdownLeft, 0);
+  say("R Junior: FCY 2S"); // mensagem atrasada depois do fim nao religa a contagem
+  await rc.pollChat();
+  assert.equal(rc.status().countdownLeft, 0);
+});
+
+// corrida com o carro do SC na frente e o lider geral atras dele
+function scSetup() {
+  const sent = [];
+  const rc = createRaceControl(fakeSettings(), { sendChat: async (t) => sent.push(t) });
+  const { token } = rc.unlock("abcd");
+  const race = (leaderLaps, scLaps = 20) =>
+    rc.apply({
+      game: "lmu",
+      session: { state: 5, trackLocation: "Spa" },
+      standings: [
+        { name: "Carro do SC", carClass: "GTE", position: 1, lapsCompleted: scLaps, raceState: 2 },
+        { name: "Lider", carClass: "GT3", position: 2, lapsCompleted: leaderLaps, raceState: 2 },
+      ],
+    });
+  return { rc, token, sent, race };
+}
+
+test("SC nessa volta: bandeira verde quando o lider abre a volta; o carro do SC nao conta", async () => {
+  const { rc, token, sent, race } = scSetup();
+  await rc.setSc(token, true);
+  race(10);
+  await rc.setSc(token, false);
+  let s = race(10).session;
+  assert.deepEqual([s.scIn, s.scCall, s.scOut], [true, false, true]);
+  assert.equal(race(10, 21).session.scIn, true); // o carro do SC cruzou a linha: ainda nao
+  s = race(11, 21).session;
+  assert.deepEqual([s.scIn, s.scCall, s.scOut], [false, false, undefined]);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(sent[sent.length - 1], "BANDEIRA VERDE");
+});
+
+test("SC nessa volta: a direcao pode dar a verde antes; FCY e novo SC cancelam", async () => {
+  const { rc, token, sent, race } = scSetup();
+  await rc.setSc(token, true);
+  race(10);
+  await rc.setSc(token, false);
+  race(10);
+  await rc.setSc(token, false); // "bandeira verde agora"
+  assert.equal(rc.status().scIn, false);
+  assert.equal(sent[sent.length - 1], "BANDEIRA VERDE");
+
+  await rc.setSc(token, true);
+  await rc.setSc(token, false);
+  await rc.setSc(token, true); // SC de novo antes da relargada
+  assert.deepEqual([rc.status().sc, rc.status().scIn], [true, false]);
+  await rc.setFcy(token, true); // SC virou FCY: nao ha relargada
+  assert.deepEqual([rc.status().sc, rc.status().scIn], [false, false]);
+});
+
+test("SC nessa volta seguindo o chat: o lider abre a volta aqui, sem mandar nada; ou chega a verde pelo chat", async () => {
+  const { rc, say, lmu } = followSetup();
+  lmu();
+  await rc.pollChat();
+  say("R Junior: SAFETY CAR NA PISTA");
+  await rc.pollChat();
+  say("R Junior: SAFETY CAR NESSA VOLTA - PREPARAR PARA RELARGADA");
+  await rc.pollChat();
+  assert.equal(rc.status().scIn, true);
+  say("R Junior: BANDEIRA VERDE");
+  await rc.pollChat();
+  assert.equal(rc.status().scIn, false);
+});
+
+test("bandeira verde: 15 s por padrao, com o aviso e a contagem so nos ultimos 10 s", async () => {
+  const settings = fakeSettings();
+  settings.set("lmuGreenCountdown", undefined);
+  const data = {};
+  const sent = [];
+  const rc = create({ get: (k) => data[k], set: (k, v) => (v == null ? delete data[k] : (data[k] = v)) }, { passwordHash: TEST_HASH, sendChat: async (m) => sent.push(m) });
+  data.lmuFcyCountdown = 0;
+  data.lmuChatLag = 0;
+  data.lmuChatCountdown = false;
+  const { token } = rc.unlock("abcd");
+  await rc.setFcy(token, true);
+  const st = await rc.setFcy(token, false);
+  assert.equal(st.greenSec, 15);
+  assert.equal(st.greenLeft, 15);
+  assert.equal(sent[sent.length - 1], "15S PARA VERDE");
+  await rc.setFcy(token, false); // encerra e nao deixa timers pendurados no teste
+});
+
+test("atraso do chat: 1 s por padrao; as overlays esperam a mensagem aparecer", async () => {
+  const settings = fakeSettings();
+  settings.set("lmuChatLag", 0.1);
+  settings.set("lmuFcyCountdown", 0);
+  settings.set("lmuChatCountdown", false);
+  const fcyWhenSent = [];
+  let rc = null;
+  rc = createRaceControl(settings, { sendChat: async () => fcyWhenSent.push(rc.status().fcy) });
+  const { token } = rc.unlock("abcd");
+  const pending = rc.setFcy(token, true);
+  await rc.setFcy(token, true); // clique repetido nao manda de novo
+  assert.equal(rc.status().fcy, false); // mensagem saiu, tela ainda nao
+  await pending;
+  assert.equal(rc.status().fcy, true);
+  assert.deepEqual(fcyWhenSent, [false]);
+  assert.equal(create(fakeSettings(), { passwordHash: TEST_HASH }).status().chatLagSec, 1);
+});
+
+test("atraso do chat: a contagem sai antes para aparecer no segundo certo; o limite vale no fim", async () => {
+  const settings = fakeSettings();
+  settings.set("lmuChatLag", 0.3);
+  settings.set("lmuFcyCountdown", 2);
+  const log = [];
+  let rc = null;
+  rc = createRaceControl(settings, { sendChat: async (t) => log.push([t, rc.status().countdownLeft]) });
+  const { token } = rc.unlock("abcd");
+  await rc.setFcy(token, true);
+  await new Promise((r) => setTimeout(r, 1900));
+  assert.deepEqual(log.map((l) => l[0]), ["FCY EM 2S - 60KMH", "FCY 1S", "FCY - LIMITADOR DE BOX LIGADO"]);
+  assert.equal(log[2][1], 1); // a mensagem final sai antes de o limite valer aqui
+  await new Promise((r) => setTimeout(r, 400));
+  assert.equal(rc.status().countdownLeft, 0);
+  await rc.setFcy(token, false);
+});
+
+test("atraso do chat: SC nessa volta, a mensagem de verde sai uma vez e o verde vem depois", async () => {
+  const settings = fakeSettings();
+  settings.set("lmuChatLag", 0.05);
+  const sent = [];
+  const rc = createRaceControl(settings, { sendChat: async (t) => sent.push(t) });
+  const { token } = rc.unlock("abcd");
+  const race = (laps) => rc.apply({ game: "lmu", session: { state: 5, trackLocation: "Spa" }, standings: [{ name: "Lider", position: 1, lapsCompleted: laps, raceState: 2 }] });
+  await rc.setSc(token, true);
+  await rc.setSc(token, false);
+  race(10);
+  race(11);
+  race(11);
+  assert.equal(rc.status().scIn, true);
+  assert.equal(sent.filter((m) => m === "BANDEIRA VERDE").length, 1);
+  await new Promise((r) => setTimeout(r, 120));
+  assert.equal(rc.status().scIn, false);
+});
+
+test("seguir o chat: ligado por padrao; desligar fica salvo e para de ler", async () => {
+  const settings = fakeSettings();
+  const chat = [];
+  let t = 1000000;
+  const rc = createRaceControl(settings, { sendChat: async () => {}, fetchChat: async () => chat.slice(), now: () => t });
+  assert.equal(rc.status().follow.enabled, true);
+  const lmu = () => rc.apply({ game: "lmu", session: { state: 5, trackLocation: "Spa" }, standings: [] });
+  lmu();
+  await rc.pollChat();
+  chat.push({ message: "R Junior: SAFETY CAR NA PISTA", timestamp: 1 });
+  await rc.pollChat();
+  assert.equal(rc.status().sc, true);
+  rc.setFollow({ enabled: false });
+  assert.equal(settings.data.lmuFollowChat, false);
+  assert.equal(rc.status().follow.enabled, false);
+  chat.push({ message: "R Junior: BANDEIRA VERDE", timestamp: 2 });
+  chat.push({ message: "R Junior: SAFETY CAR NESSA VOLTA - PREPARAR PARA RELARGADA", timestamp: 3 });
+  await rc.pollChat();
+  assert.deepEqual([rc.status().sc, rc.status().scIn], [true, false]);
+  t += 1;
+});
+
+test("seguir o chat no PC que manda: a propria mensagem voltando nao atrapalha a contagem", async () => {
+  const settings = fakeSettings();
+  settings.set("lmuChatLag", 0.05);
+  settings.set("lmuFcyCountdown", 1);
+  const chat = [];
+  const sent = [];
+  const rc = createRaceControl(settings, {
+    sendChat: async (m) => {
+      sent.push(m);
+      chat.push({ message: "R Junior: " + m, timestamp: chat.length + 1 });
+    },
+    fetchChat: async () => chat.slice(),
+  });
+  const { token } = rc.unlock("abcd");
+  rc.apply({ game: "lmu", session: { state: 5, trackLocation: "Spa" }, standings: [] });
+  await rc.pollChat();
+  const pending = rc.setFcy(token, true);
+  await new Promise((r) => setTimeout(r, 10));
+  await rc.pollChat(); // a mensagem ja apareceu no chat, antes de acabar a espera
+  assert.equal(rc.status().fcy, false);
+  await pending;
+  assert.deepEqual([rc.status().fcy, rc.status().fcyBy], [true, "painel"]);
+  await new Promise((r) => setTimeout(r, 1100));
+  assert.ok(sent.includes("FCY - LIMITADOR DE BOX LIGADO"), "a contagem no chat rodou");
+  await rc.setFcy(token, false);
 });

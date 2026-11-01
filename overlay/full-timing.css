@@ -21,6 +21,7 @@ html, body {
 #full-timing.hidden { display: none; }
 /* safety car / FCY: so uma etiqueta amarela no lugar do nome da sessao */
 #full-timing.sc-out #ftSessionLabel { padding: 2px 10px; border-radius: 3px; background: #f5e33f; color: #000; }
+#full-timing.green-soon #ftSessionLabel { background: #17a34a; color: #fff; }
 
 /* ---- cabecalho: liga | pista | sessao ---- */
 .ft-title {

@@ -363,9 +363,21 @@
 
     <h3>FCY e Safety Car de outro PC (pelo chat) · sem senha</h3>
     <div class="box">
-      <div class="muted">Para quem transmite sem ser a direção de prova: esta opção não precisa de senha. O app lê o chat do LMU e liga ou desliga o FCY e o Safety Car na tabela quando aparecem as mensagens deles, mandadas por qualquer um (o texto padrão das mensagens já é igual nos dois PCs). A contagem do FCY vem da própria mensagem. O LMU precisa estar aberto e na sessão.</div>
+      <div class="muted">Para quem transmite sem ser a direção de prova: esta opção não precisa de senha e vem ligada. O app lê o chat do LMU e liga ou desliga o FCY e o Safety Car na tabela quando aparecem as mensagens deles, mandadas por qualquer um (o texto padrão das mensagens já é igual nos dois PCs). A contagem do FCY vem da própria mensagem. O LMU precisa estar aberto e na sessão.</div>
       <div class="row"><label><input id="lmuFollow" type="checkbox" style="width:auto" onchange="lmuSaveFollow()" /> Seguir o FCY e o Safety Car mandados no chat</label></div>
       <div class="muted" id="lmuFcyNow"></div>
+    </div>
+
+    <h3>Áudios · sem senha</h3>
+    <div class="box">
+      <div class="muted">Áudios gravados, tocados neste PC: "Safety Car", "Full Course Yellow in 20", a contagem de 10 a 1, "Full Course Yellow", "Bandeira Verde" e "Safety Car Nessa volta", no dispositivo de som padrão do Windows. Numa transmissão, esse som pode ir para a live.</div>
+      <div class="row"><label><input id="voiceOn" type="checkbox" style="width:auto" onchange="saveVoice()" /> Tocar a contagem e os avisos</label></div>
+      <div class="row">
+        <label class="muted" style="min-width:60px">Volume</label>
+        <input id="voiceVolume" type="range" min="0" max="100" step="5" onchange="saveVoice()" />
+        <button onclick="testVoice()">Testar áudio</button>
+      </div>
+      <div class="muted" id="voiceStatus"></div>
     </div>
 
     <div id="lmuLocked" class="box">
@@ -390,7 +402,7 @@
         <div class="muted" id="lmuScCarHint"></div>
         <div class="muted" id="waveStatus"></div>
         <div class="muted" id="fcyStatus"></div>
-        <div class="muted">Com o FCY ou o Safety Car ligado, as tabelas ficam amarelas com "FCY" ou "SAFETY CAR" no cabeçalho e o log da sessão registra o início e o fim. Ligar um desliga o outro (sem mandar a bandeira verde). Numa sessão nova, os dois voltam a ficar desligados.</div>
+        <div class="muted">Com o FCY ou o Safety Car ligado, as tabelas ficam amarelas com "FCY" ou "SAFETY CAR" no cabeçalho e o log da sessão registra o início e o fim. Ligar um desliga o outro (sem mandar a bandeira verde). Ao encerrar o Safety Car, fica "SC nessa volta" e a bandeira verde vem quando o líder geral abrir uma nova volta (o carro do SC não conta); o botão também pode dar a verde na hora. Numa sessão nova, os dois voltam a ficar desligados.</div>
       </div>
 
       <h3>Direção de prova</h3>
@@ -402,7 +414,7 @@
 
       <h3>Quem queimou o FCY</h3>
       <div class="box">
-        <div class="muted">Acima de 60 km/h depois do fim da contagem. Cada trecho acima do limite é uma linha: quanto tempo ficou acima, quanto tempo depois do fim da contagem começou e a velocidade máxima. Em amarelo: acima do limite agora. A lista vale para a sessão inteira e também entra no log.</div>
+        <div class="muted">Acima de 62 km/h (limite de 60 + margem de erro de 2) depois do fim da contagem. Cada trecho acima do limite é uma linha: quanto tempo ficou acima, quanto tempo depois do fim da contagem começou e a velocidade máxima. Em amarelo: acima do limite agora. A lista vale para a sessão inteira e também entra no log.</div>
         <table id="fcyBreaches">
           <thead><tr><th>FCY</th><th>Piloto</th><th class="n">Acima por</th><th class="n">Após a contagem</th><th class="n">Máx.</th></tr></thead>
           <tbody></tbody>
@@ -417,6 +429,8 @@
         <div class="row"><label class="muted" style="min-width:110px">Verde em</label><input id="lmuMsgEnding" maxlength="200" onchange="lmuSaveMessages()" /></div>
         <div class="row"><label class="muted" style="min-width:110px">Contagem verde</label><input id="lmuMsgGreenTick" maxlength="200" onchange="lmuSaveMessages()" /></div>
         <div class="row"><label class="muted" style="min-width:110px">Fim do FCY</label><input id="lmuMsgOff" maxlength="200" onchange="lmuSaveMessages()" /></div>
+        <div class="row"><label class="muted" style="min-width:110px">Atraso do chat (s)</label><input id="lmuChatLag" type="number" min="0" max="5" step="0.1" style="max-width:110px" onchange="lmuSaveMessages()" /></div>
+        <div class="muted">Tempo que a mensagem leva para aparecer no chat do jogo. O app espera isso antes de mudar as tabelas e tocar o áudio, para sair junto com o chat. Se a contagem do app estiver adiantada, aumente; se estiver atrasada, diminua.</div>
         <div class="row"><label class="muted" style="min-width:110px">Contagem da verde (s)</label><input id="lmuGreen" type="number" min="0" max="60" step="1" style="max-width:110px" onchange="lmuSaveMessages()" /></div>
         <div class="muted">Ao encerrar o FCY: manda "Verde em" ({s} vira os segundos), conta no chat e só no fim manda "Fim do FCY" e desliga o FCY. Até lá o limite de 60 km/h continua valendo. Apertar o botão de novo durante essa contagem encerra na hora. 0: encerra direto.</div>
         <div class="row"><label class="muted" style="min-width:110px">Contagem do FCY (s)</label><input id="lmuCountdown" type="number" min="0" max="60" step="1" style="max-width:110px" onchange="lmuSaveMessages()" /></div>

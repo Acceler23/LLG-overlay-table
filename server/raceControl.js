@@ -4,7 +4,7 @@
 // (POST /rest/chat/ com o texto puro: sai com o nome da conta deste PC) e
 // marca o FCY nos dados que vao para as overlays (session.fcy).
 // Depois da contagem (segundos para os pilotos reduzirem), quem passar de
-// 60 km/h queima o FCY: cada trecho acima do limite vira uma infracao, com
+// 62 km/h (60 + a margem de erro de 2) queima o FCY: cada trecho acima do limite vira uma infracao, com
 // a duracao, a velocidade maxima e quanto tempo depois do fim da contagem
 // comecou. Ao encerrar, a contagem da bandeira verde (fcyEnding + numeros no
 // chat) mantem o FCY e o limite valendo ate a mensagem de bandeira verde.
@@ -13,6 +13,8 @@
 // juntos: ligar um desliga o outro sem mandar a mensagem de bandeira verde.
 // Com o SC, o botao de retardatarios manda o aviso e, 10 s depois, o nome de
 // cada retardatario na fila (entre o SC e o lider) + "PODE ULTRAPASSAR".
+// Encerrar o SC nao e bandeira verde ainda: fica "SC nessa volta" (session.scIn) ate
+// o lider geral, sem contar o carro do SC, abrir uma nova volta.
 // O safety car e um carro da sessao: por padrao o unico LMGTE; sem LMGTE ou
 // com mais de um, o painel escolhe. Ele nao conta como lider nem no FCY.
 // A senha da aba e fixa, a mesma para toda a liga; no codigo fica so o hash.
@@ -28,25 +30,31 @@ const PORT = process.env.LMU_API_PORT || 6397;
 const CHAT_URL = `http://127.0.0.1:${PORT}/rest/chat/`;
 const MAX_MESSAGE = 200;
 const FCY_LIMIT_KMH = 60;
+const FCY_MARGIN_KMH = 2; // margem de erro: so queima acima de 62 km/h
 const COUNTDOWN_MAX_S = 60;
 const DEFAULT_COUNTDOWN_S = 20;
 const CHAT_TICKS_FROM = 10; // a contagem no chat so manda os ultimos 10 s (FCY EM 15S, 5 s de pausa, FCY EM 10S...)
-const DEFAULT_GREEN_S = 10; // contagem da bandeira verde ao encerrar o FCY
+// A mensagem leva um tempo para aparecer no chat do jogo: quem manda espera isso
+// antes de mudar as overlays e tocar o audio, para sair junto com o que os pilotos leem
+const DEFAULT_CHAT_LAG_S = 1;
+const CHAT_LAG_MAX_S = 5;
+const DEFAULT_GREEN_S = 15; // contagem da bandeira verde ao encerrar o FCY
 // senha fixa da aba LMU (scrypt com sal; o texto da senha nao fica no codigo)
 const LMU_PASSWORD_HASH = "36b0138383bab716c9b0153fce39aa27:27f7ff95c3b305e9c6a2379bcfeaddb500477f44f70050ff1c4f50f6c6c248df";
-const CHAT_POLL_MS = 1000;
+const CHAT_POLL_MS = 250; // seguindo o chat: o atraso de cada mensagem e no maximo isso
 const GAME_POLL_MS = 2000; // lista de incidentes do jogo
 const REPLAY_MAX_KMH = 5; // acima disso, o proprio carro esta andando
 const CHAT_IDLE_MS = 5000; // sem dados do LMU por esse tempo: para de ler o chat
 // padroes de versoes anteriores (salvos no painel sem querer mudar)
 const OLD_FCY_ON = ["FCY - FULL COURSE YELLOW", "FCY EM {s} SEGUNDOS - LIMITE 60 KM/H", "FCY EM {s}S"];
 const OLD_FCY_GO = ["FCY"];
+const OLD_FCY_ENDING = ["BANDEIRA VERDE EM {s} SEGUNDOS"];
 // {s} vira os segundos da contagem. fcyGo: no fim da contagem (o limite passa a valer)
 const DEFAULT_MESSAGES = {
   fcyOn: "FCY EM {s}S - 60KMH",
   fcyOff: "BANDEIRA VERDE",
   fcyGo: "FCY - LIMITADOR DE BOX LIGADO",
-  fcyEnding: "BANDEIRA VERDE EM {s} SEGUNDOS",
+  fcyEnding: "{s}S PARA VERDE",
   fcyTick: "FCY {s}S", // contagem no chat depois de fcyOn
   greenTick: "VERDE {s}S", // contagem no chat depois de fcyEnding
   scOn: "SAFETY CAR NA PISTA",
@@ -201,6 +209,9 @@ function createRaceControl(settings, opts = {}) {
   let fcyBy = ""; // quem ligou: "painel" ou o nome de quem mandou no chat
   let sc = false; // safety car chamado pela direcao de prova
   let scBy = "";
+  let scIn = false; // "SC nessa volta": encerrado, esperando o lider abrir a volta
+  let scInBy = "";
+  let scInLaps = null; // voltas do lider quando o SC foi encerrado
   let lastLmu = null; // ultimos dados do LMU (fila do safety car)
   let waveTimer = null;
   let waveAt = 0; // quando sai a lista de retardatarios (0: nenhuma pendente)
@@ -213,6 +224,8 @@ function createRaceControl(settings, opts = {}) {
   let chatLastTs = null; // ultima mensagem do chat ja vista (null: ainda nao leu)
   let chatBusy = false;
   let countdownTimers = []; // contagem mandada no chat (10, 9, ... 1, FCY)
+  let sending = false; // mensagem mandada, esperando aparecer no chat
+  let scInGreenSent = false; // bandeira verde mandada ao chat, esperando aparecer
   let sessionKey; // undefined: nenhum dado ainda
   let open = new Map(); // nome -> trecho acima do limite em andamento
   let breaches = []; // infracoes da sessao (todos os FCY dela)
@@ -224,12 +237,19 @@ function createRaceControl(settings, opts = {}) {
     const saved = Object.assign({}, settings.get("lmuMessages") || {});
     if (OLD_FCY_ON.includes(saved.fcyOn)) delete saved.fcyOn;
     if (OLD_FCY_GO.includes(saved.fcyGo)) delete saved.fcyGo;
+    if (OLD_FCY_ENDING.includes(saved.fcyEnding)) delete saved.fcyEnding;
     return Object.assign({}, DEFAULT_MESSAGES, saved);
   };
   const countdownSec = () => {
     const v = Number(settings.get("lmuFcyCountdown"));
     return Number.isFinite(v) ? Math.max(0, Math.min(COUNTDOWN_MAX_S, Math.round(v))) : DEFAULT_COUNTDOWN_S;
   };
+  const chatLagSec = () => {
+    const v = settings.get("lmuChatLag");
+    return v == null || !Number.isFinite(Number(v)) ? DEFAULT_CHAT_LAG_S : Math.max(0, Math.min(CHAT_LAG_MAX_S, Number(v)));
+  };
+  const chatLagMs = () => Math.round(chatLagSec() * 1000);
+  const afterChat = () => (chatLagMs() > 0 ? new Promise((r) => setTimeout(r, chatLagMs())) : Promise.resolve());
   const chatCountdown = () => settings.get("lmuChatCountdown") !== false; // padrao: manda
   const countdownLeft = () => (fcy ? Math.max(0, Math.ceil((countdownEndAt - now()) / 1000)) : 0);
   const greenSec = () => {
@@ -245,7 +265,7 @@ function createRaceControl(settings, opts = {}) {
   }
 
   // seguir o FCY e o SC do chat (outro PC da direcao de prova manda a mensagem)
-  const follow = () => ({ enabled: !!settings.get("lmuFollowChat") });
+  const follow = () => ({ enabled: settings.get("lmuFollowChat") !== false }); // ligado por padrao
 
   const status = () => ({
     ok: true,
@@ -253,13 +273,16 @@ function createRaceControl(settings, opts = {}) {
     fcyBy,
     sc,
     scBy,
+    scIn,
     follow: follow(),
     countdownLeft: countdownLeft(),
     countdownSec: countdownSec(),
     greenLeft: greenLeft(),
     greenSec: greenSec(),
+    chatLagSec: chatLagSec(),
     chatCountdown: chatCountdown(),
     limitKmh: FCY_LIMIT_KMH,
+    breachKmh: FCY_LIMIT_KMH + FCY_MARGIN_KMH,
     messages: messages(),
     breaches: breaches.concat(liveOver()),
     waveLeft: sc && waveAt ? Math.max(0, Math.ceil((waveAt - now()) / 1000)) : 0,
@@ -309,6 +332,10 @@ function createRaceControl(settings, opts = {}) {
       const s = Math.round(Number(body.countdownSec));
       settings.set("lmuFcyCountdown", Number.isFinite(s) ? Math.max(0, Math.min(COUNTDOWN_MAX_S, s)) : DEFAULT_COUNTDOWN_S);
     }
+    if (body && body.chatLagSec != null) {
+      const s = Number(body.chatLagSec);
+      if (Number.isFinite(s)) settings.set("lmuChatLag", Math.max(0, Math.min(CHAT_LAG_MAX_S, s)));
+    }
     if (body && body.greenSec != null) {
       const s = Math.round(Number(body.greenSec));
       settings.set("lmuGreenCountdown", Number.isFinite(s) ? Math.max(0, Math.min(COUNTDOWN_MAX_S, s)) : DEFAULT_GREEN_S);
@@ -334,18 +361,28 @@ function createRaceControl(settings, opts = {}) {
   // novo durante a contagem encerra na hora.
   async function setFcy(token, on) {
     if (!allowed(token)) return { ok: false, error: "Aba bloqueada" };
-    const m = messages();
-    if (!on && fcy && !greenAt && greenSec() > 0) {
-      const secs = greenSec();
-      await send(m.fcyEnding.split("{s}").join(String(secs)));
-      greenAt = now() + secs * 1000;
-      runCountdown(secs, greenAt, m.fcyOff, () => turn(false), tickTemplate(m.greenTick));
+    if (sending) return status(); // clique repetido enquanto a mensagem chega no chat
+    sending = true;
+    try {
+      const m = messages();
+      if (!on && fcy && !greenAt && greenSec() > 0) {
+        const secs = greenSec();
+        await send(m.fcyEnding.split("{s}").join(String(secs)));
+        await afterChat();
+        if (fcy) {
+          greenAt = now() + secs * 1000;
+          runCountdown(secs, greenAt, m.fcyOff, () => turn(false), tickTemplate(m.greenTick));
+        }
+        return status();
+      }
+      const secs = countdownSec();
+      await send(on ? m.fcyOn.split("{s}").join(String(secs)) : m.fcyOff);
+      await afterChat();
+      if (turn(on, secs, "painel") && on && chatCountdown() && secs > 0) runCountdown(secs, countdownEndAt, m.fcyGo, null, tickTemplate(m.fcyTick));
       return status();
+    } finally {
+      sending = false;
     }
-    const secs = countdownSec();
-    await send(on ? m.fcyOn.split("{s}").join(String(secs)) : m.fcyOff);
-    if (turn(on, secs, "painel") && on && chatCountdown() && secs > 0) runCountdown(secs, countdownEndAt, m.fcyGo, null, tickTemplate(m.fcyTick));
-    return status();
   }
 
   // modelo da contagem ("FCY {s}S"); sem {s}: so os numeros
@@ -356,20 +393,17 @@ function createRaceControl(settings, opts = {}) {
   // Sem modelo: so o numero (10, 9, ...). Com modelo ({s} = segundos, "FCY 9S"):
   // os segundos do inicio ja foram na mensagem de abertura, entao comeca do seguinte.
   // Contagem maior que CHAT_TICKS_FROM: pausa ate faltarem esses segundos.
-  // O outro PC que segue o chat acerta o relogio por essas mensagens.
+  // O outro PC que segue o chat acerta o relogio por essas mensagens. Cada uma sai
+  // antes do tempo do atraso do chat, para aparecer la no segundo certo.
   function runCountdown(secs, endAt, finalText, onEnd, tickTpl) {
     stopChatCountdown();
     const say = (text) => send(text).catch(() => {});
     const tick = (k) => (tickTpl ? tickTpl.split("{s}").join(String(k)) : String(k));
     const first = Math.min(tickTpl ? secs - 1 : secs, CHAT_TICKS_FROM);
-    if (chatCountdown()) for (let k = first; k >= 1; k--) countdownTimers.push(setTimeout(() => fcy && say(tick(k)), Math.max(0, endAt - k * 1000 - now())));
-    countdownTimers.push(
-      setTimeout(() => {
-        if (!fcy) return;
-        say(finalText);
-        if (onEnd) onEnd();
-      }, Math.max(0, endAt - now()))
-    );
+    const lag = chatLagMs();
+    if (chatCountdown()) for (let k = first; k >= 1; k--) countdownTimers.push(setTimeout(() => fcy && say(tick(k)), Math.max(0, endAt - k * 1000 - lag - now())));
+    countdownTimers.push(setTimeout(() => fcy && say(finalText), Math.max(0, endAt - lag - now())));
+    if (onEnd) countdownTimers.push(setTimeout(() => fcy && onEnd(), Math.max(0, endAt - now())));
   }
 
   function stopChatCountdown() {
@@ -381,9 +415,26 @@ function createRaceControl(settings, opts = {}) {
   async function setSc(token, on) {
     if (!allowed(token)) return { ok: false, error: "Aba bloqueada" };
     const m = messages();
-    await send(on ? m.scOn : m.scOff);
-    if (turnSc(on, "painel") && on) await send(m.scCatch).catch(() => {});
-    return status();
+    // "bandeira verde agora": a direcao nao quer esperar o lider abrir a volta
+    if (sending) return status(); // clique repetido enquanto a mensagem chega no chat
+    sending = true;
+    try {
+      if (!on && !sc && scIn) {
+        await send(m.fcyOff);
+        await afterChat();
+        scIn = false;
+        onChange();
+        return status();
+      }
+      const starting = on && !sc;
+      await send(on ? m.scOn : m.scOff);
+      if (starting) await send(m.scCatch).catch(() => {});
+      await afterChat();
+      turnSc(on, "painel");
+      return status();
+    } finally {
+      sending = false;
+    }
   }
 
   // Retardatarios podem ultrapassar: o aviso agora e, 10 s depois, o nome de
@@ -427,11 +478,41 @@ function createRaceControl(settings, opts = {}) {
     return status();
   }
 
+  // Bandeira verde depois do SC: o lider geral (sem o carro do SC) abriu uma nova volta
+  function checkScIn(payload) {
+    const scName = scCarName(payload.standings);
+    const field = (payload.standings || []).filter((e) => e && e.name && e.name !== scName && !outOfRace(e));
+    const leader = field.slice().sort((a, b) => (a.position || 999) - (b.position || 999))[0];
+    if (!leader) return;
+    const laps = Number(leader.lapsCompleted) || 0;
+    if (scInLaps === null) {
+      scInLaps = laps;
+      return;
+    }
+    if (laps <= scInLaps || scInGreenSent) return;
+    const green = () => {
+      scInGreenSent = false;
+      if (!scIn) return;
+      scIn = false;
+      onChange();
+    };
+    // quem encerrou o SC avisa no chat e espera a mensagem aparecer; quem so segue o chat nao manda nada
+    if (scInBy !== "painel") return green();
+    send(messages().fcyOff).catch(() => {});
+    if (chatLagMs() <= 0) return green();
+    scInGreenSent = true;
+    setTimeout(green, chatLagMs());
+  }
+
   function turnSc(on, by) {
+    if (on && scIn) scIn = false; // SC de novo antes da relargada
     if (!!on === sc) return false;
     if (on && fcy) turn(false); // FCY virou safety car
     sc = !!on;
     scBy = on ? by : "";
+    scIn = !on && !!by; // sem "by": o SC virou FCY, nao ha relargada
+    scInBy = by || "";
+    scInLaps = null;
     if (!on) {
       clearTimeout(waveTimer);
       waveAt = 0;
@@ -447,6 +528,7 @@ function createRaceControl(settings, opts = {}) {
     const t = now();
     if (on) {
       if (sc) turnSc(false); // safety car virou FCY
+      scIn = false;
       fcyNumber++;
       countdownEndAt = t + secs * 1000;
       fcyBy = by;
@@ -463,7 +545,7 @@ function createRaceControl(settings, opts = {}) {
 
   function setFollow(body) {
     const enabled = !!(body && body.enabled);
-    settings.set("lmuFollowChat", enabled || null);
+    settings.set("lmuFollowChat", enabled);
     settings.set("lmuChatSenders", null); // filtro antigo de contas: nao existe mais
     chatLastTs = null; // religou: o que ja esta no chat nao conta
     return status();
@@ -488,9 +570,17 @@ function createRaceControl(settings, opts = {}) {
       const fresh = list.filter((c) => c && Number(c.timestamp) > chatLastTs).sort((a, b) => Number(a.timestamp) - Number(b.timestamp));
       chatLastTs = Math.max(chatLastTs, latest);
       fresh.forEach((c) => {
+        // este PC acabou de mandar e esta esperando aparecer no chat: e a propria mensagem
+        if (sending) return;
         const { sender, text } = splitChat(c.message);
         const match = matchMessage(text, messages());
         if (!match) return;
+        // a direcao mandou a bandeira verde antes de o lider abrir a volta
+        if (match.kind === "fcy" && match.on === false && scIn) {
+          scIn = false;
+          onChange();
+          return;
+        }
         if (match.kind === "sc") {
           turnSc(match.on, sender || "chat");
           return;
@@ -502,7 +592,7 @@ function createRaceControl(settings, opts = {}) {
         }
         if (match.go) {
           // fim da contagem: acerta o relogio daqui (ou liga, se perdeu o inicio)
-          if (fcy) countdownEndAt = Math.min(countdownEndAt, now());
+          if (fcy) countdownEndAt = now();
           else turn(true, 0, sender || "chat");
           return;
         }
@@ -561,7 +651,7 @@ function createRaceControl(settings, opts = {}) {
         breaches = [];
         fcyNumber = 0;
         if (fcy || sc) {
-          fcy = sc = false;
+          fcy = sc = scIn = false;
           fcyBy = scBy = "";
           stopChatCountdown();
           onChange();
@@ -574,7 +664,7 @@ function createRaceControl(settings, opts = {}) {
     markLmuYellow(payload);
     game.apply(payload);
     incidents.apply(payload, {
-      under: fcy ? "FCY" : sc || payload.session.scOut ? "SC" : null,
+      under: fcy ? "FCY" : sc || scIn || payload.session.scOut ? "SC" : null,
       countdown: fcy && t < countdownEndAt, // ainda na contagem do FCY
       scName: scCarName(payload.standings),
       released: waveLast ? waveLast.names : [], // retardatarios liberados podem passar
@@ -588,7 +678,7 @@ function createRaceControl(settings, opts = {}) {
         const v = speedKmh(e);
         if (v == null) return;
         seen.add(e.name);
-        if (v > FCY_LIMIT_KMH) {
+        if (v > FCY_LIMIT_KMH + FCY_MARGIN_KMH) {
           const o = open.get(e.name);
           if (o) o.maxKmh = Math.max(o.maxKmh, v);
           else open.set(e.name, { start: t, maxKmh: v, carNumber: e.carNumber || "", et: payload.session.eventTime });
@@ -601,8 +691,10 @@ function createRaceControl(settings, opts = {}) {
     }
 
     payload.session.fcy = fcy;
+    if (scIn) checkScIn(payload);
     payload.session.scCall = sc; // safety car chamado no painel ou no chat
-    if (sc) payload.session.scOut = true; // tabela, log e disputas como no SC do jogo
+    payload.session.scIn = scIn; // SC nessa volta
+    if (sc || scIn) payload.session.scOut = true; // tabela, log e disputas como no SC do jogo
     payload.session.fcyCountdown = countdownLeft(); // segundos ate o limite valer (0: valendo)
     payload.session.fcyGreenIn = greenLeft(); // contagem da bandeira verde (0: nenhuma)
     payload.session.fcyBreaches = fresh; // so as que fecharam agora (o log registra cada uma uma vez)

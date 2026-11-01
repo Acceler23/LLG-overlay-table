@@ -8,10 +8,10 @@ test("painel e etiqueta: o que mostrar em cada estado", () => {
   assert.deepEqual([info({ scOut: true }).key, info({ scOut: true }).tag], ["sc", "SAFETY CAR"]); // SC do proprio jogo
   assert.equal(info({ scCall: true }).key, "sc");
   assert.equal(info({ fcy: true }).tag, "FCY");
-  assert.equal(info({ fcy: true, fcyCountdown: 7 }).tag, "FCY EM 7");
+  const count = info({ fcy: true, fcyCountdown: 7 });
+  assert.deepEqual([count.key, count.tag, count.big], ["count", "FCY EM 7", undefined]); // contagem: so a barra, sem painel
   const prep = info({ fcy: true, fcyGreenIn: 5, fcyCountdown: 0 });
-  assert.deepEqual([prep.key, prep.tag], ["prep", "VERDE EM 5"]);
-  assert.match(prep.big, /Preparar/);
+  assert.deepEqual([prep.key, prep.tag, prep.big], ["prep", "5S PARA VERDE", undefined]); // so a barra, sem painel
   assert.equal(info({ fcy: true, scOut: true }).key, "fcy"); // FCY tem prioridade
 });
 
@@ -24,4 +24,16 @@ test("bandeira verde: quando o FCY ou o SC acaba na mesma sessao; sessao nova na
   assert.equal(key({}, null), null); // corrida normal
   assert.equal(key({}, "fcy", false), null); // sessao nova so desliga
   assert.equal(key({ fcy: true }, "green"), "fcy"); // novo FCY logo depois
+});
+
+test("contagem do FCY cancelada antes de ativar nao vira bandeira verde", () => {
+  assert.equal(resolve({}, "count", true), null);
+  assert.equal(resolve({ fcy: true }, "count", true).key, "fcy"); // ativou: agora vem o painel amarelo
+});
+
+test("SC nessa volta: painel e etiqueta proprios, e depois a bandeira verde", () => {
+  const scin = info({ scIn: true, scOut: true });
+  assert.deepEqual([scin.key, scin.tag], ["scin", "SC NESSA VOLTA"]);
+  assert.match(scin.big, /Nessa/);
+  assert.equal(resolve({}, "scin", true).key, "green");
 });

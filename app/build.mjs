@@ -35,6 +35,7 @@ const ignore = [
   // imagem original do icone e o script que gera app/icon.ico e app/icon.png
   /^\/icon\.png$/,
   /^\/app\/make-icon\.ps1$/,
+  /^\/app\/make-voice-clips\.ps1$/,
   /^\/\.github($|\/)/,
   /^\/overlay\/assets\/\.git($|\/)/,
   /\.log$/,

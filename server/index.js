@@ -28,6 +28,7 @@ const { compactTracks, compactMultiseasons } = require("./trackStats");
 const { createSessionLog } = require("./sessionLog");
 const { createTrackMap } = require("./trackMap");
 const { createRaceControl } = require("./raceControl");
+const { createRaceVoice } = require("./raceVoice");
 
 // Chave do RLT: a do .env tem prioridade; senao, a ultima salva pelo painel.
 // (ler sempre: uma chave antiga, salva em texto puro, e regravada criptografada)
@@ -598,8 +599,13 @@ const lmuReply = (res, out) => res.status(out.ok ? 200 : 403).json(out);
 app.get("/api/lmu/control", (req, res) => {
   const st = raceControl.status();
   // bloqueado: sem as mensagens
-  res.json(raceControl.allowed(lmuToken(req)) ? Object.assign(st, { unlocked: true }) : { ok: true, fcy: st.fcy, fcyBy: st.fcyBy, sc: st.sc, scBy: st.scBy, follow: st.follow, unlocked: false });
+  res.json(raceControl.allowed(lmuToken(req)) ? Object.assign(st, { unlocked: true }) : { ok: true, fcy: st.fcy, fcyBy: st.fcyBy, sc: st.sc, scBy: st.scBy, scIn: st.scIn, follow: st.follow, unlocked: false });
 });
+// voz (TTS) da contagem e dos avisos: opcao de cada PC, sem senha
+const raceVoice = createRaceVoice(settings);
+app.get("/api/voice", (req, res) => res.json(raceVoice.status()));
+app.post("/api/voice", (req, res) => res.json(raceVoice.configure(req.body)));
+app.post("/api/voice/test", (req, res) => res.json(raceVoice.test()));
 // seguir o FCY e o SC do chat: sem senha (so le o chat, nao manda nada)
 app.post("/api/lmu/follow", (req, res) => res.json({ ok: true, follow: raceControl.setFollow(req.body).follow }));
 app.post("/api/lmu/unlock", (req, res) => lmuReply(res, raceControl.unlock(req.body && req.body.password)));
@@ -939,6 +945,7 @@ function handleGamePayload(payload) {
     lmuIdentity.apply(payload); // numero e equipe das pinturas nao oficiais (API local do jogo)
   }
   raceControl.apply(payload); // FCY ligado pelo painel (so no LMU)
+  raceVoice.update(payload && payload.session);
   const data = raceState.apply(payload);
   noteSessionNames(data && data.standings);
   if (data && sessionLog.apply(data)) wss.broadcast(sessionLogPayload());
