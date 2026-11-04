@@ -23,8 +23,6 @@ const EDIT_CSS = `
 `;
 
 let panelWin = null;
-let driverWin = null;
-let editCssKey = null;
 let quitting = false;
 let ports = { http: 8080, bridge: 5607 };
 const helpers = []; // { name, child }
@@ -33,7 +31,9 @@ const helpers = []; // { name, child }
 const dataDir = app.getPath("userData");
 const stateFile = path.join(dataDir, "app-state.json");
 let state = {
-  driver: { visible: false, edit: false, scale: 1, x: null, y: null },
+  driver: { visible: false, edit: false, scale: 1, x: null, y: null, preset: null },
+  // outras overlays do piloto (telemetria...): { id: { visible, scale, x, y } }
+  overlays: {},
   // programas que o usuario escolheu no painel para abrir junto com o aplicativo
   companion: { paths: [] },
 };
@@ -42,6 +42,7 @@ function loadState() {
   try {
     const saved = JSON.parse(fs.readFileSync(stateFile, "utf8"));
     state.driver = Object.assign(state.driver, saved.driver || {});
+    state.overlays = Object.assign({}, saved.overlays || {});
     const c = saved.companion || {};
     // versao anterior guardava um programa so, em "path"
     const list = Array.isArray(c.paths) ? c.paths : c.path ? [c.path] : [];
@@ -113,7 +114,7 @@ function createPanelWindow() {
     backgroundColor: "#111111",
     webPreferences: { preload: path.join(__dirname, "preload.js"), contextIsolation: true },
   });
-  panelWin.loadURL(`http://127.0.0.1:${ports.http}/panel/panel.html`);
+  panelWin.loadURL(`http://127.0.0.1:${ports.http}/panel/painel.html`);
   // links (docs do RLT etc.) abrem no navegador padrao
   panelWin.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
@@ -126,11 +127,62 @@ function createPanelWindow() {
   });
 }
 
-// ---------------------------------------------------------------- janela do piloto
-function driverBounds() {
-  const s = state.driver;
-  const width = Math.round(DRIVER_BASE.width * s.scale);
-  const height = Math.round(DRIVER_BASE.height * s.scale);
+// ---------------------------------------------------------------- overlays do piloto
+// Janelas transparentes por cima do jogo (que precisa estar em janela sem bordas):
+//   tabela      a tabela do piloto (overlay/driver-table.html)
+//   telemetria  acelerador, freio e volante rolando e o combustivel por volta (overlay/telemetria.html)
+//   gforce      a forca G do carro, sem as luzes dos pedais (overlay/g-force.html?piloto=1)
+// Cada uma tem visivel, escala e posicao proprias. O modo de edicao vale para todas, como no
+// Cubic Racing Analyser: destravadas, ganham contorno, arrastam pelo corpo e uma barrinha
+// (ou a roda do mouse) muda o tamanho; travadas, os cliques passam direto para o jogo.
+const PILOT_OVERLAYS = {
+  tabela: { page: "driver-table.html", width: DRIVER_BASE.width, height: DRIVER_BASE.height, x: 20, y: 120 },
+  telemetria: { page: "telemetria.html", width: 460, height: 150, x: null, y: -190 }, // x null = centralizada; y negativo = a partir de baixo
+  gforce: { page: "g-force.html?piloto=1", width: 300, height: 350, x: -330, y: 260 }, // x negativo = a partir da direita
+};
+const pilotWins = {}; // id -> BrowserWindow
+const pilotCss = {}; // id -> chave do CSS de edicao
+
+// estado de cada overlay; a tabela continua em state.driver (versoes anteriores)
+function ovState(id) {
+  if (id === "tabela") return state.driver;
+  if (!state.overlays[id]) state.overlays[id] = { visible: false, scale: 1, x: null, y: null, opacity: 1 };
+  return state.overlays[id];
+}
+
+// transparencia do FUNDO da overlay (painel: Ajustes > Piloto): numeros, linhas e graficos ficam
+// sempre inteiros. Vai na variavel CSS --llg-bg, que multiplica o alfa dos fundos (0 = sem fundo).
+function overlayOpacity(id) {
+  const o = Number(ovState(id).opacity);
+  return Number.isFinite(o) ? Math.max(0, Math.min(1, o)) : 1;
+}
+function applyOpacity(id) {
+  const win = pilotWins[id];
+  if (!win || win.isDestroyed()) return;
+  const o = overlayOpacity(id);
+  win.webContents.executeJavaScript(`document.documentElement.style.setProperty("--llg-bg", "${o}"); true`).catch(() => {});
+}
+
+// Lugares prontos da tabela (painel antigo): linha (t, m, b) + coluna (l, c, r)
+const DRIVER_PRESETS = ["tl", "tc", "tr", "ml", "mc", "mr", "bl", "bc", "br"];
+const DRIVER_CONTENT_HEIGHT = 300; // px da tabela com ~6 linhas, em escala 1
+const PRESET_MARGIN = 24;
+function presetPosition(preset, scale) {
+  const a = screen.getPrimaryDisplay().workArea;
+  const w = Math.round(DRIVER_BASE.width * scale);
+  const h = Math.round(DRIVER_CONTENT_HEIGHT * scale);
+  const col = preset[1];
+  const row = preset[0];
+  const x = col === "l" ? a.x + PRESET_MARGIN : col === "c" ? a.x + (a.width - w) / 2 : a.x + a.width - w - PRESET_MARGIN;
+  const y = row === "t" ? a.y + PRESET_MARGIN : row === "m" ? a.y + (a.height - h) / 2 : a.y + a.height - h - PRESET_MARGIN;
+  return { x: Math.round(x), y: Math.round(y) };
+}
+
+function overlayBounds(id) {
+  const def = PILOT_OVERLAYS[id];
+  const s = ovState(id);
+  const width = Math.round(def.width * (s.scale || 1));
+  const height = Math.round(def.height * (s.scale || 1));
   let x = s.x;
   let y = s.y;
   // posicao salva fora de qualquer monitor (ex: monitor desconectado): volta ao padrao
@@ -143,30 +195,49 @@ function driverBounds() {
     });
   if (!visible) {
     const a = screen.getPrimaryDisplay().workArea;
-    x = a.x + 20;
-    y = a.y + 120;
+    x = def.x == null ? a.x + (a.width - width) / 2 : def.x < 0 ? a.x + a.width + def.x * (s.scale || 1) : a.x + def.x;
+    y = def.y < 0 ? a.y + a.height + def.y * (s.scale || 1) : a.y + def.y;
   }
   return { x: Math.round(x), y: Math.round(y), width, height };
 }
 
-function applyDriverEdit() {
-  if (!driverWin) return;
+// barrinha do modo de edicao, dentro de cada janela: diminuir, aumentar, travar
+const EDIT_JS = `(() => {
+  if (document.getElementById("llgEditBar")) return;
+  const bar = document.createElement("div");
+  bar.id = "llgEditBar";
+  bar.style.cssText = "position:fixed;top:6px;right:6px;z-index:99999;display:flex;gap:4px;-webkit-app-region:no-drag;font:700 14px Segoe UI,sans-serif;zoom:1";
+  const btn = (txt, title, fn) => { const b = document.createElement("button"); b.textContent = txt; b.title = title;
+    b.style.cssText = "min-width:30px;height:28px;border:0;border-radius:7px;background:#00b7e8;color:#002a5c;font:inherit;cursor:pointer";
+    b.onclick = fn; bar.appendChild(b); };
+  btn("−", "Menor", () => window.llgOverlay && window.llgOverlay.scaleBy(-0.1));
+  btn("+", "Maior", () => window.llgOverlay && window.llgOverlay.scaleBy(0.1));
+  btn("Travar", "Travar todas as overlays", () => window.llgOverlay && window.llgOverlay.lock());
+  document.body.appendChild(bar);
+  window.__llgWheel = (e) => { if (window.llgOverlay) window.llgOverlay.scaleBy(e.deltaY < 0 ? 0.05 : -0.05); };
+  window.addEventListener("wheel", window.__llgWheel);
+})()`;
+const UNEDIT_JS = `(() => { const b = document.getElementById("llgEditBar"); if (b) b.remove(); if (window.__llgWheel) window.removeEventListener("wheel", window.__llgWheel); })()`;
+
+function applyEdit(id) {
+  const win = pilotWins[id];
+  if (!win) return;
   const edit = !!state.driver.edit;
-  driverWin.setIgnoreMouseEvents(!edit); // travada: cliques passam direto pro jogo
-  driverWin.setFocusable(edit);
-  if (edit && !editCssKey) {
-    driverWin.webContents.insertCSS(EDIT_CSS).then((key) => {
-      editCssKey = key;
-    });
-  } else if (!edit && editCssKey) {
-    driverWin.webContents.removeInsertedCSS(editCssKey).catch(() => {});
-    editCssKey = null;
+  win.setIgnoreMouseEvents(!edit); // travada: cliques passam direto pro jogo
+  win.setFocusable(edit);
+  if (edit && !pilotCss[id]) {
+    win.webContents.insertCSS(EDIT_CSS).then((key) => (pilotCss[id] = key));
+  } else if (!edit && pilotCss[id]) {
+    win.webContents.removeInsertedCSS(pilotCss[id]).catch(() => {});
+    pilotCss[id] = null;
   }
+  win.webContents.executeJavaScript(edit ? EDIT_JS : UNEDIT_JS).catch(() => {});
 }
 
-function createDriverWindow() {
-  driverWin = new BrowserWindow(
-    Object.assign(driverBounds(), {
+function createOverlayWindow(id) {
+  const def = PILOT_OVERLAYS[id];
+  const win = new BrowserWindow(
+    Object.assign(overlayBounds(id), {
       frame: false,
       transparent: true,
       resizable: false,
@@ -176,57 +247,135 @@ function createDriverWindow() {
       hasShadow: false,
       focusable: false,
       show: false,
-      webPreferences: { backgroundThrottling: false },
+      webPreferences: { backgroundThrottling: false, preload: path.join(__dirname, "overlay-preload.js") },
     })
   );
+  pilotWins[id] = win;
+  pilotCss[id] = null;
   // nivel mais alto: fica por cima do jogo em janela sem bordas
-  driverWin.setAlwaysOnTop(true, "screen-saver");
-  editCssKey = null;
-  driverWin.loadURL(`http://127.0.0.1:${ports.http}/overlay/driver-table.html`);
-  driverWin.webContents.on("did-finish-load", applyDriverEdit);
-  driverWin.once("ready-to-show", () => {
-    if (driverWin) driverWin.showInactive();
+  win.setAlwaysOnTop(true, "screen-saver");
+  win.loadURL(`http://127.0.0.1:${ports.http}/overlay/${def.page}`);
+  win.webContents.on("did-finish-load", () => {
+    pilotCss[id] = null;
+    applyEdit(id);
+    applyOpacity(id);
   });
-  driverWin.on("moved", () => {
-    if (!driverWin) return;
-    const [x, y] = driverWin.getPosition();
-    state.driver.x = x;
-    state.driver.y = y;
+  win.once("ready-to-show", () => {
+    if (pilotWins[id]) pilotWins[id].showInactive();
+  });
+  win.on("moved", () => {
+    if (pilotWins[id] !== win) return;
+    const [x, y] = win.getPosition();
+    const s = ovState(id);
+    if (x !== s.x || y !== s.y) s.preset = null; // arrastada pelo piloto
+    s.x = x;
+    s.y = y;
     saveState();
   });
-  driverWin.on("closed", () => {
-    driverWin = null;
-    editCssKey = null;
+  win.on("closed", () => {
+    if (pilotWins[id] === win) {
+      delete pilotWins[id];
+      pilotCss[id] = null;
+    }
   });
 }
 
-function syncDriverWindow() {
-  if (state.driver.visible) {
-    if (!driverWin) createDriverWindow();
+function syncOverlay(id) {
+  const s = ovState(id);
+  const win = pilotWins[id];
+  if (s.visible) {
+    if (!win) createOverlayWindow(id);
     else {
-      driverWin.setBounds(driverBounds());
-      applyDriverEdit();
+      win.setBounds(overlayBounds(id));
+      applyOpacity(id);
+      applyEdit(id);
     }
-  } else if (driverWin) {
-    driverWin.destroy();
+  } else if (win) {
+    win.destroy();
   }
 }
 
+function syncOverlays() {
+  Object.keys(PILOT_OVERLAYS).forEach(syncOverlay);
+  // em edicao, as overlays mostram os dados de exemplo (server/demo.js) quando o jogo nao esta em sessao
+  try {
+    require(path.join(ROOT, "server", "index.js")).setPilotDemo(!!state.driver.edit);
+  } catch (_) {}
+}
+
+function anyOverlayVisible() {
+  return Object.keys(PILOT_OVERLAYS).some((id) => ovState(id).visible);
+}
+
+// estado para o painel: { edit, overlays: { id: { visible, scale } } }
+function pilotState() {
+  const overlays = {};
+  Object.keys(PILOT_OVERLAYS).forEach((id) => {
+    const s = ovState(id);
+    overlays[id] = { visible: !!s.visible, scale: s.scale || 1, opacity: overlayOpacity(id) };
+  });
+  return { edit: !!state.driver.edit, overlays };
+}
+
+// patch: { edit } ou { id, visible, scale, reset }
+function setPilot(patch) {
+  const p = patch || {};
+  if (p.id && PILOT_OVERLAYS[p.id]) {
+    const s = ovState(p.id);
+    if (typeof p.visible === "boolean") s.visible = p.visible;
+    if (typeof p.scale === "number" && p.scale > 0) s.scale = Math.max(0.5, Math.min(2.5, p.scale));
+    if (typeof p.opacity === "number") s.opacity = Math.max(0, Math.min(1, p.opacity));
+    if (p.reset) {
+      s.x = null;
+      s.y = null;
+      s.preset = null;
+    }
+  }
+  if (typeof p.edit === "boolean") state.driver.edit = p.edit;
+  if (!anyOverlayVisible()) state.driver.edit = false;
+  saveState();
+  syncOverlays();
+  return pilotState();
+}
+
+// painel antigo: so a tabela
 function setDriver(patch) {
   const s = state.driver;
   const p = patch || {};
   if (typeof p.visible === "boolean") s.visible = p.visible;
-  if (typeof p.edit === "boolean") s.edit = p.edit;
   if (typeof p.scale === "number" && p.scale > 0) s.scale = Math.max(0.5, Math.min(2.5, p.scale));
   if (p.reset) {
     s.x = null;
     s.y = null;
+    s.preset = null;
   }
-  if (!s.visible) s.edit = false;
+  if (typeof p.preset === "string" && DRIVER_PRESETS.includes(p.preset)) s.preset = p.preset;
+  if (s.preset && (typeof p.preset === "string" || typeof p.scale === "number")) {
+    const pos = presetPosition(s.preset, s.scale);
+    s.x = pos.x;
+    s.y = pos.y;
+  }
+  if (typeof p.edit === "boolean") s.edit = p.edit;
+  if (!anyOverlayVisible()) s.edit = false;
   saveState();
-  syncDriverWindow();
+  syncOverlays();
   return s;
 }
+
+// barrinha da janela em edicao: tamanho e travar
+ipcMain.on("pilot:scaleBy", (event, delta) => {
+  const id = Object.keys(pilotWins).find((k) => pilotWins[k] && pilotWins[k].webContents === event.sender);
+  if (!id || typeof delta !== "number") return;
+  const s = ovState(id);
+  setPilot({ id, scale: Math.round(((s.scale || 1) + delta) * 100) / 100 });
+  if (panelWin) panelWin.webContents.send("pilot:changed", pilotState());
+});
+ipcMain.on("pilot:lock", () => {
+  setPilot({ edit: false });
+  if (panelWin) panelWin.webContents.send("pilot:changed", pilotState());
+});
+ipcMain.handle("pilot:get", () => pilotState());
+ipcMain.handle("pilot:set", (_event, patch) => setPilot(patch));
 
 ipcMain.handle("driver:get", () => state.driver);
 ipcMain.handle("driver:set", (_event, patch) => setDriver(patch));
@@ -425,7 +574,9 @@ if (!app.requestSingleInstanceLock()) {
     const listenerArgs = ["-BridgePort", String(ports.bridge)].concat(parent);
     // so para testes: ler outro mapeamento de memoria no lugar do jogo
     if (process.env.LLG_MAP_NAME) listenerArgs.push("-MapName", process.env.LLG_MAP_NAME);
-    startHelper("listener.ps1", listenerArgs);
+    // LLG_LISTENER_LEGACY=1 volta ao leitor antigo do AMS2 (todo em PowerShell, ~50x mais CPU);
+    // fica so como reserva caso o novo (C# compilado) de problema em algum PC
+    startHelper(process.env.LLG_LISTENER_LEGACY === "1" ? "listener-legacy.ps1" : "listener.ps1", listenerArgs);
     // Le Mans Ultimate: outro listener, mesma ponte. O servidor usa o jogo que estiver em sessao.
     const lmuArgs = ["-BridgePort", String(ports.bridge)].concat(parent);
     if (process.env.LLG_LMU_MAP_NAME) lmuArgs.push("-MapName", process.env.LLG_LMU_MAP_NAME);
@@ -433,7 +584,7 @@ if (!app.requestSingleInstanceLock()) {
     if (!process.env.LLG_NO_HOTKEYS) startHelper("hotkeys.ps1", ["-Port", String(ports.http)].concat(parent));
 
     createPanelWindow();
-    syncDriverWindow();
+    syncOverlays();
     // abre junto os programas escolhidos no painel, se houver
     launchCompanions(true).catch(() => {});
     // versao nova no GitHub? (depois que o painel aparece, para o aviso ficar por cima dele)

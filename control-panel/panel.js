@@ -15,6 +15,12 @@ socket.addEventListener("message", async (ev) => {
   } catch (_) {
     return;
   }
+  // arquivos do painel mudaram (versao nova): recarrega, como o painel novo e as overlays
+  if (msg.type === "hello" && msg.panelBuildId) {
+    if (window.__panelBuildId && msg.panelBuildId !== window.__panelBuildId) location.reload();
+    window.__panelBuildId = msg.panelBuildId;
+    return;
+  }
   if (msg.type !== "rltConfig" || !msg.data || !msg.data.seasonId) return;
   const sel = document.getElementById("rltSeason");
   const id = String(msg.data.seasonId);
@@ -1037,7 +1043,7 @@ function showFirstRun(show) {
 
 function skipFirstRun() {
   try {
-    sessionStorage.setItem("skipFirstRun", "1"); // nao pergunta de novo ate fechar o painel
+    localStorage.setItem("skipFirstRun", "1"); // escolheu usar sem chave: nao pergunta mais (a chave fica em Ajustes > Liga)
   } catch (_) {}
   showFirstRun(false);
 }
@@ -1073,7 +1079,7 @@ async function refreshStatus() {
     showRltStatus(body);
     let skipped = false;
     try {
-      skipped = sessionStorage.getItem("skipFirstRun") === "1";
+      skipped = localStorage.getItem("skipFirstRun") === "1";
     } catch (_) {}
     showFirstRun(!body.hasKey && !skipped);
     if (body.hasKey) {

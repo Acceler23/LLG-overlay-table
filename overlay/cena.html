@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <title>Cena LLG</title>
+  <!-- Todas as overlays numa fonte so do OBS (1920x1080). Cada fonte de navegador do OBS e um
+       navegador inteiro gerando quadros na taxa do OBS mesmo sem nada mudar; juntas, as overlays
+       dividem um navegador so. Parametros: ?sem=mapa,gforce (tira overlays) e, para mudar o lugar
+       de uma, ?tabela=20,0 / ?card=680,850 / ?mapa=1480,20 / ?gforce=1600,640 (x,y em px). -->
+  <style>
+    html, body { margin: 0; padding: 0; width: 1920px; height: 1080px; overflow: hidden; background: transparent; }
+    iframe { position: absolute; border: 0; background: transparent; overflow: hidden; }
+  </style>
+</head>
+<body>
+  <script>
+    const OVERLAYS = {
+      tabela: { src: "timing-table.html", w: 880, h: 1080, x: 20, y: 0 },
+      card: { src: "driver-card.html", w: 560, h: 210, x: 680, y: 850 },
+      mapa: { src: "track-map.html", w: 420, h: 400, x: 1480, y: 20 },
+      gforce: { src: "g-force.html", w: 300, h: 420, x: 1600, y: 640 },
+    };
+    const params = new URLSearchParams(location.search);
+    const off = new Set((params.get("sem") || "").split(",").map((s) => s.trim()));
+    for (const [id, o] of Object.entries(OVERLAYS)) {
+      if (off.has(id)) continue;
+      const pos = (params.get(id) || "").split(",").map(Number);
+      const f = document.createElement("iframe");
+      f.id = id;
+      f.src = o.src;
+      f.setAttribute("scrolling", "no");
+      f.style.cssText = `left:${Number.isFinite(pos[0]) && params.has(id) ? pos[0] : o.x}px;top:${Number.isFinite(pos[1]) && params.has(id) ? pos[1] : o.y}px;width:${o.w}px;height:${o.h}px`;
+      document.body.appendChild(f);
+    }
+  </script>
+</body>
+</html>

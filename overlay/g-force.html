@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <title>G-Force</title>
+  <link rel="stylesheet" href="g-force.css" />
+</head>
+<body>
+  <!-- Forca G e aceleracao do piloto em foco. Liga e desliga pelo painel ou pela tecla 8.
+       Fonte do OBS sugerida: 300 x 380. Parametros: ?max=3 (G no anel externo), ?eixo=acel (acelerando para cima). -->
+  <div id="card" class="idle">
+    <div class="head">
+      <span class="pos" id="pos">&mdash;</span>
+      <span class="name" id="name"></span>
+      <span class="badge" id="badge"></span>
+    </div>
+    <canvas id="circle" width="240" height="240"></canvas>
+    <div class="pedals" id="pedals">
+      <div class="light thr" id="thrLight"><span class="fill"></span><span class="txt">ACELERADOR</span></div>
+      <div class="light brk" id="brkLight"><span class="fill"></span><span class="txt">FREIO</span></div>
+    </div>
+    <div class="vals">
+      <div class="val"><span class="lbl">LATERAL</span><span class="num" id="latVal">&mdash;</span><span class="side" id="latSide"></span></div>
+      <div class="val"><span class="lbl" id="longLbl">ACEL / FREIO</span><span class="num" id="longVal">&mdash;</span><span class="side" id="longSide"></span></div>    </div>
+  </div>
+  <script src="shared/domguard.js"></script>
+  <script src="shared/framecap.js"></script>
+  <script src="shared/gforce.js"></script>
+  <script src="g-force.js"></script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 # Hotkeys globais — funciona com o jogo em foco
-# , . = coluna | [ ] = pagina | P = destaque | 0 = standings
+# , . = coluna | [ ] = pagina | P = destaque | 0 = standings | 8 = g-force | 9 = disputas
 # Se o AMS2 estiver como Admin, rode este script tambem como Admin.
 
 # -ParentPid: PID do aplicativo que iniciou este script; se ele fechar, o
@@ -83,8 +83,8 @@ public class KbHook {
         _lastVk = vk;
         _lastTick = now;
         // enfileira o caractere: , . [ ] P 0 9 (o 0 e o 9 do teclado numerico tambem valem)
-        char c = vk == 0x60 ? '0' : vk == 0x69 ? '9' : KeyChar((uint)vk);
-        if (c == ',' || c == '.' || c == '[' || c == ']' || c == 'P' || c == '0' || c == '9')
+        char c = vk == 0x60 ? '0' : vk == 0x68 ? '8' : vk == 0x69 ? '9' : KeyChar((uint)vk);
+        if (c == ',' || c == '.' || c == '[' || c == ']' || c == 'P' || c == '0' || c == '8' || c == '9')
           Queue.Enqueue((int)c);
       }
     }
@@ -131,7 +131,7 @@ function Send-Cmd([string]$name) {
 
 try {
   [KbHook]::Start()
-  Write-Host "Hook OK. Teclas: , . [ ] P 0 9"
+  Write-Host "Hook OK. Teclas: , . [ ] P 0 8 9"
   Write-Host "Se o jogo for Admin, rode este script como Admin."
   Write-Host "Feche a janela para sair."
 
@@ -156,6 +156,7 @@ try {
         93 { if (Send-Cmd "overlay.nextPage") { Write-Host "[]] pagina +" } }
         80 { if (Send-Cmd "overlay.toggleHighlight") { Write-Host "[P] destaque" } }
         48 { if (Send-Cmd "overlay.toggleStandings") { Write-Host "[0] standings" } }
+        56 { if (Send-Cmd "overlay.toggleGForce") { Write-Host "[8] g-force" } }
         57 { if (Send-Cmd "overlay.toggleBattles") { Write-Host "[9] disputas" } }
       }
     }

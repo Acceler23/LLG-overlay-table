@@ -138,6 +138,10 @@
     <div class="box">
       <div class="muted">No OBS: adicione uma Fonte de Navegador e cole o link. O fundo já é transparente.</div>
       <div class="row">
+        <a href="/panel/previa.html" target="_blank"><button type="button">Ver prévia da transmissão</button></a>
+        <span class="muted">todas as overlays juntas, no tamanho do OBS, sem precisar do OBS</span>
+      </div>
+      <div class="row">
         <label class="muted" style="min-width:90px">Tabela</label>
         <input id="linkTable" type="text" readonly onclick="this.select()" />
         <button onclick="copyLink('linkTable')">Copiar</button>
@@ -172,6 +176,7 @@
       <div class="row wrap">
         <button onclick="send('overlay.toggleHighlight')">Destaque ( P )</button>
         <button onclick="send('overlay.toggleBattles')" title="Só em corrida e sem safety car. Destaca os carros que ficam 5 s com menos de 0,6 s de intervalo (e deixam de ser depois de 10 s fora disso, ou na hora se abrir mais de 2 s), mostra a velocidade deles ao lado da tabela e trava a parte da tabela que fica rodando onde houver disputa.">Disputas ( 9 )</button>
+        <button onclick="send('overlay.toggleGForce')" title="Mostra ou esconde a overlay de força G e aceleração do piloto em foco (overlay/g-force.html). Mostra a telemetria do jogo quando ela é do carro em foco e, senão, uma estimativa pela velocidade e posição do carro (marcada como ESTIMADO).">G-force ( 8 )</button>
         <button onclick="send('race.reset')" title="Recalcula posições de largada e zera paradas/stint. Use no grid se a overlay foi aberta no meio da sessão.">Zerar largada e paradas</button>
       </div>
       <div class="row">
@@ -517,6 +522,14 @@
 
     <h3>Registro</h3>
     <div id="rltLog"></div>
+
+    <h3>Painel novo</h3>
+    <div class="box">
+      <div class="row">
+        <a href="/panel/painel.html"><button type="button">Voltar para o painel novo</button></a>
+        <span class="muted">Pilotar, Transmitir e Ajustes, com botões grandes</span>
+      </div>
+    </div>
   </section>
 
   <script src="panel.js"></script>

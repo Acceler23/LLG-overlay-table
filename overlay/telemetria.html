@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <title>Telemetria</title>
+  <link rel="stylesheet" href="telemetria.css" />
+</head>
+<body>
+  <!-- Telemetria do piloto (overlay do piloto, como o grafico ao vivo do Cubic Racing Analyser):
+       acelerador, freio e (opcional) volante rolando nos ultimos segundos, e o consumo de
+       combustivel por volta no canto. Legenda, volante e combustivel
+       ligam e desligam pelo painel (Ajustes > Piloto). Desenhada em 460x150 e escalada pela
+       largura da janela. Tambem serve como fonte do OBS. -->
+  <div id="tm" class="stale">
+    <canvas id="chart" width="460" height="150"></canvas>
+    <div class="fuel" id="fuel" hidden><b id="fuelNow">–</b><span id="fuelLap"></span></div>
+    <div class="legend" id="legend"><b class="thr">ACEL</b><b class="brk">FREIO</b><b class="str" id="legendStr">VOLANTE</b></div>
+  </div>
+  <script src="shared/domguard.js"></script>
+  <script src="telemetria.js"></script>
+</body>
+</html>

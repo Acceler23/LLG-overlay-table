@@ -10,8 +10,8 @@
     <!-- so aparece enquanto o mapa da pista esta sendo aprendido -->
     <div id="tmStatus" class="tm-status"></div>
     <svg id="tmSvg" class="tm-map" xmlns="http://www.w3.org/2000/svg">
-      <polyline id="tmOutline" class="tm-outline" />
-      <polyline id="tmLine" class="tm-line" />
+      <path id="tmOutline" class="tm-outline" />
+      <path id="tmLine" class="tm-line" />
       <!-- trechos sob bandeira amarela (AMS2: os mini-setores com carro de bandeira amarela) -->
       <g id="tmYellow"></g>
       <line id="tmStart" class="tm-start" />
@@ -19,6 +19,7 @@
     </svg>
   </div>
 
+  <script src="shared/domguard.js"></script>
   <script src="shared/names.js"></script>
   <script src="shared/colors.js"></script>
   <script src="shared/logos.js"></script>

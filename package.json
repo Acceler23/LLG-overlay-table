@@ -1,6 +1,6 @@
 {
   "name": "llg-overlay",
-  "version": "0.1.0",
+  "version": "0.4.2",
   "description": "Overlays de transmissao para o Automobilista 2: tabela de tempos, driver card e tabela do piloto",
   "main": "app/main.js",
   "type": "commonjs",
@@ -8,6 +8,7 @@
     "start": "node server/index.js",
     "app": "node app/dev.js",
     "build": "node app/build.mjs",
+    "installer": "node installer/gerar.mjs",
     "encrypt-key": "node server/secret.js",
     "test": "node --test"
   },

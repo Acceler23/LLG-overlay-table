@@ -15,8 +15,8 @@ html, body {
   width: 340px;
   border-radius: 6px;
   overflow: hidden;
-  background: rgba(8, 30, 56, 0.86);
-  border: 1px solid rgba(0, 197, 253, 0.55);
+  background: rgba(8, 30, 56, calc(0.86 * var(--llg-bg, 1)));
+  border: 1px solid rgba(0, 197, 253, calc(0.55 * var(--llg-bg, 1)));
   font-variant-numeric: tabular-nums;
 }
 
@@ -27,7 +27,7 @@ html, body {
   justify-content: space-between;
   align-items: center;
   padding: 4px 10px;
-  background: rgba(10, 45, 82, 0.95);
+  background: rgba(10, 45, 82, calc(0.95 * var(--llg-bg, 1)));
   font-size: 13px;
   font-weight: 800;
   letter-spacing: 0.5px;
@@ -50,7 +50,7 @@ html, body {
   flex-wrap: wrap;
   gap: 3px;
   padding: 3px 6px;
-  background: rgba(0, 0, 0, 0.35);
+  background: rgba(0, 0, 0, calc(0.35 * var(--llg-bg, 1)));
 }
 
 .dt-chip {
@@ -68,7 +68,7 @@ html, body {
   display: grid;
   grid-template-columns: 26px 24px 1fr 62px;
   padding: 1px 0;
-  background: rgba(0, 0, 0, 0.2);
+  background: rgba(0, 0, 0, calc(0.2 * var(--llg-bg, 1)));
 }
 
 .dt-cols.with-pts {
@@ -105,7 +105,7 @@ html, body {
 .dt-head-col.gap { padding-right: 8px; }
 
 .dt-head.points {
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, calc(0.45 * var(--llg-bg, 1)));
   color: #7ec8ff;
   border-top: 1px solid rgba(0, 197, 253, 0.35);
   margin-top: 2px;
