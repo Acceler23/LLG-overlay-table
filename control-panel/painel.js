@@ -67,7 +67,7 @@
   // Os Ajustes sao separados por quem usa: pilotando so aparecem os do piloto (overlays,
   // engenheiro), transmitindo so os da transmissao, na direcao de prova so os dela. Liga e
   // Sistema valem para todos. Cada categoria e cartao diz em que modos aparece (data-modos).
-  const MODO_DA_TELA = { piloto: "piloto", pinturas: "piloto", transmissao: "transmissao", direcao: "direcao" };
+  const MODO_DA_TELA = { piloto: "piloto", transmissao: "transmissao", direcao: "direcao" };
   const NOME_MODO = { piloto: "Piloto", transmissao: "Transmissão", direcao: "Direção de prova" };
   let modoAjustes = "piloto";
 
@@ -402,6 +402,24 @@
 
   // ================================================================ pinturas (carsets)
   let carsetPoll = null;
+  // resultado do ultimo liga/desliga: fica na tela ate a proxima acao (antes a lista
+  // recarregava por cima e o aviso sumia na hora)
+  let avisoCarset = "";
+  let esperandoDownload = null; // temporada baixando para ligar: mostra o resultado quando terminar
+
+  function textoRelatorio(season, report) {
+    const fora = report.skipped || [];
+    const assumidas = report.adopted ? ` (${report.adopted} já estavam no jogo, instaladas por fora, e passaram para o carset)` : "";
+    if (!fora.length) return `${season}: ${report.applied} pinturas ligadas${assumidas}.`;
+    const ocupado = fora.filter((m) => /ID ja ocupado/.test(m)).length;
+    const semCarro = fora.filter((m) => /nao esta instalado/.test(m)).map((m) => m.split(":")[0]);
+    const semBody = fora.filter((m) => /falta a textura BODY/.test(m)).length;
+    const partes = [];
+    if (ocupado) partes.push(`${ocupado} com o número (ID) já usado por outra pintura no jogo`);
+    if (semCarro.length) partes.push(`carro não instalado: ${semCarro.join(", ")}`);
+    if (semBody) partes.push(`${semBody} sem a textura da carroceria no carset`);
+    return `${season}: ${report.applied} pinturas ligadas${assumidas}, ${fora.length} de fora (${partes.join("; ")}).`;
+  }
 
   async function carregarPinturas() {
     let d;
@@ -417,13 +435,19 @@
     $("pinturasEstado").textContent = ativos ? (ativos === 1 ? "1 LIGADA" : `${ativos} LIGADAS`) : "NENHUMA";
     $("pinturasResumo").textContent = ativos ? d.items.filter((i) => i.active).map((i) => i.season).join(" · ") : "Carsets da liga";
     $("tilePinturas").classList.toggle("on", ativos > 0);
-    $("carsetNote").textContent = !d.gameFound
+    // baixou e ligou em segundo plano: o resultado vem no status
+    if (esperandoDownload && !st.running && st.season === esperandoDownload) {
+      if (st.phase === "done" && st.result && st.result.report) avisoCarset = textoRelatorio(st.season, st.result.report);
+      esperandoDownload = null;
+    }
+    const base = !d.gameFound
       ? "Automobilista 2 não encontrado nas bibliotecas da Steam."
       : d.listError
         ? "Lista da liga indisponível agora: " + d.listError
         : d.gameRunning
           ? "O jogo está aberto: as pinturas mudam quando ele carregar de novo."
           : "";
+    $("carsetNote").textContent = [avisoCarset, base].filter(Boolean).join(" ");
     if (!d.items.length) {
       $("carsetRows").innerHTML = '<div class="muted">Nenhum carset na lista da liga.</div>';
       return;
@@ -451,25 +475,29 @@
     // baixando: acompanha ate terminar
     clearTimeout(carsetPoll);
     if (st.running && tela === "pinturas") carsetPoll = setTimeout(carregarPinturas, 1000);
+    else if (esperandoDownload && tela === "pinturas") carsetPoll = setTimeout(carregarPinturas, 1000); // o status ainda nao virou "baixando"
   }
 
   async function alternarCarset(season, on) {
+    avisoCarset = "";
     try {
       const r = await api("POST", "/api/carsets/toggle", { season, on });
-      if (r.report) {
-        const fora = r.report.skipped.length;
-        $("carsetNote").textContent = `${season}: ${r.report.applied} pinturas ligadas${fora ? `, ${fora} de fora (ID já usado por outra pintura ou carro não instalado)` : ""}.`;
-      }
+      if (r.report) avisoCarset = textoRelatorio(season, r.report);
+      else if (r.downloading) esperandoDownload = season;
+      else if (!on) avisoCarset = `${season}: desligado.`;
     } catch (err) {
-      $("carsetNote").textContent = "Não deu: " + err.message;
+      avisoCarset = "Não deu: " + err.message;
     }
     carregarPinturas();
   }
 
-  AO_ABRIR.pinturas = carregarPinturas;
+  AO_ABRIR.pinturas = () => {
+    avisoCarset = ""; // aviso velho de outra visita nao volta
+    carregarPinturas();
+  };
+  AO_ABRIR.inicio = carregarPinturas; // o botao das pinturas fica na tela inicial
   AO_ABRIR.piloto = () => {
     renderPiloto();
-    carregarPinturas();
     carregarEngenheiro();
   };
 
@@ -591,6 +619,7 @@
   // ================================================================ transmitir · preparar
   let semLigacao = 0;
   let temporada = "";
+  let temporadaPausada = false;
 
   if (typeof window.showLinks === "function") {
     const orig = window.showLinks;
@@ -625,7 +654,7 @@
         ? linha(ICO.ok, "OBS", sit.texto, "ok", "Montado", () => abrirAjustes("transmissao"))
         : linha(ICO.warn, "OBS", sit.texto + (sit.ajuda ? " · " + sit.ajuda : ""), "warn", sit.rotulo || "Ver", () => (sit.acao ? obsAcao(sit.acao) : abrirAjustes("transmissao"))),
       temporada
-        ? linha(ICO.ok, "Temporada", temporada, "ok", "Aplicada", () => abrirAjustes("liga"))
+        ? linha(ICO.ok, "Temporada", temporadaPausada ? `${temporada} · pausada até entrar numa sessão da liga` : temporada, "ok", temporadaPausada ? "Pausada" : "Ativa", () => abrirAjustes("liga"))
         : linha(ICO.warn, "Temporada", "Sem temporada: sem nomes, equipes nem pontos", "warn", "Escolher", () => abrirAjustes("liga")),
       !temporada
         ? linha(ICO.opt, "Pilotos", "Os nomes do RLT vêm com a temporada", "", "Depois", () => abrirAjustes("liga"))
@@ -651,7 +680,16 @@
       if (typeof ev.data !== "string" || !ev.data.slice(0, 40).includes('"rltConfig"')) return;
       try {
         const d = JSON.parse(ev.data).data || {};
-        temporada = d.seasonName || "";
+        temporada = d.seasonName || d.pausedSeasonName || "";
+        temporadaPausada = !!d.paused;
+        // no topo: a temporada so vale numa sessao da liga (multijogador)
+        const st = $("seasonState");
+        st.hidden = !temporada;
+        st.textContent = temporadaPausada ? "Pausada" : "Ativa";
+        st.classList.toggle("ok", !temporadaPausada);
+        st.title = temporadaPausada
+          ? "Fora de uma sessão da liga (offline ou sem pilotos do lineup): as overlays mostram só os dados do jogo"
+          : "Sessão da liga: nomes, equipes, classes e pontos do RLT nas overlays";
         renderPreparar();
       } catch (_) {}
     });

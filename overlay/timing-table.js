@@ -68,11 +68,27 @@ function tyreBadges(entry) {
 // classificacao essas paginas ficam fora do rodizio.
 const RACE_ONLY_MODES = ["Posições", "Paradas", "Stint"];
 
+// Fora isso, uma pagina sem dado nenhum (vazia ou zerada para todos os
+// pilotos) tambem sai do rodizio; basta um piloto ter o dado para ela voltar.
+// Intervalo e Gap lider aparecem sempre (na corrida o gap e medido na pista,
+// sem depender de volta completa).
+const positiveNum = (v) => typeof v === "number" && v > 0;
+const MODE_HAS_DATA = {
+  "Última volta": (e) => positiveNum(e.lastLapMs),
+  "Melhor volta": (e) => positiveNum(e.fastestLapMs),
+  "Posições": (e) => e.startPosition != null && e.position != null && e.startPosition !== e.position,
+  "Paradas": (e) => positiveNum(pitInfo(e).stops),
+  "Stint": (e) => positiveNum(pitInfo(e).stintLaps) || (latestGame === "acc" && stintLimitMin > 0 && positiveNum(pitInfo(e).stintMs)),
+  "VMax": (e) => positiveNum(e.maxSpeedKmh),
+  "Pneus": (e) => !!(e.tyreFront || e.tyreRear),
+};
+
 function rightModeAvailable(mode) {
   // (a volta de formacao, estado 4, ja faz parte da corrida)
-  if (RACE_ONLY_MODES.includes(mode)) return isRaceSession() || Number(latestSessionState) === 4;
-  if (mode !== "Pneus") return true;
-  return latestGame !== "lmu" && latestStandings.some((e) => e && (e.tyreFront || e.tyreRear));
+  if (RACE_ONLY_MODES.includes(mode) && !(isRaceSession() || Number(latestSessionState) === 4)) return false;
+  if (mode === "Pneus" && latestGame === "lmu") return false;
+  const hasData = MODE_HAS_DATA[mode];
+  return !hasData || latestStandings.some((e) => e && hasData(e));
 }
 
 function stepRightColumn(dir) {
@@ -589,6 +605,9 @@ function handleStandings(payload) {
   });
 
   latestStandings = standings;
+  // fora da sessao o jogo manda a lista vazia: a tabela some (a pontuacao do
+  // campeonato, que nao depende do jogo, continua aparecendo se estiver ligada)
+  updateSessionVisibility();
   updateSessionHeader(session);
   render(latestStandings);
 }
@@ -603,19 +622,23 @@ function checkBuildId(id) {
   else if (id !== overlayBuildId) location.reload();
 }
 
-// A pagina de disputas e ligada e desligada aqui na tabela (tecla 9, fim da
-// corrida, safety car). O driver card precisa saber para trocar o que mostra,
-// entao a tabela avisa pelo WebSocket quando o estado muda e repete de tempos
-// em tempos (um card aberto depois tambem fica sabendo).
+// A pagina de disputas e a pontuacao sao ligadas e desligadas aqui na tabela
+// (teclas 9 e 0, fim da corrida, safety car). O driver card troca o que mostra
+// conforme a tela da tabela, entao ela avisa pelo WebSocket quando muda e
+// repete de tempos em tempos (um card aberto depois tambem fica sabendo).
+//   active:    pagina de disputas na tela
+//   standings: pontuacao do campeonato na tela
 let wsSocket = null;
 let battleStateSent = null;
 
 function announceBattleState(force) {
   const active = battleActive();
-  if (!force && active === battleStateSent) return;
+  const standings = showingStandings();
+  const key = `${active}|${standings}`;
+  if (!force && key === battleStateSent) return;
   if (!wsSocket || wsSocket.readyState !== 1) return;
-  battleStateSent = active;
-  wsSocket.send(JSON.stringify({ type: "command", name: "overlay.battleState", payload: { active } }));
+  battleStateSent = key;
+  wsSocket.send(JSON.stringify({ type: "command", name: "overlay.battleState", payload: { active, standings } }));
 }
 setInterval(() => announceBattleState(true), 2000);
 
@@ -674,7 +697,9 @@ function applyOverlayCommand(name, payload = {}) {
   } else if (name === "overlay.toggleHighlight") {
     playerHighlightEnabled = !playerHighlightEnabled;
   } else if (name === "overlay.toggleStandings") {
-    standingsView = !standingsView;
+    // alterna o que esta NA TELA: sem temporada com pontuacao, o 0 nao deixa um
+    // "ligado" escondido que apareceria sozinho depois
+    standingsView = !showingStandings();
   } else if (name === "overlay.setStandings") {
     // define a tela direto (posicoes ou pontuacao), em vez de alternar
     standingsView = !!payload.value;
@@ -700,8 +725,15 @@ function applyOverlayCommand(name, payload = {}) {
     setBattleScope(payload.value);
   } else if (name === "overlay.toggleBattles") {
     // pagina de disputas: so liga em corrida e sem safety car
-    if (!battleMode && (!isRaceSession() || latestScOut)) return;
-    battleMode = !battleMode;
+    if (!battleActive() && (!isRaceSession() || latestScOut)) return;
+    if (showingStandings()) {
+      // com a pontuacao na tela, o 9 sai dela e abre as disputas (antes ligava as
+      // disputas escondidas atras da pontuacao, e elas so apareciam com o 0)
+      standingsView = false;
+      battleMode = true;
+    } else {
+      battleMode = !battleMode;
+    }
   } else if (name === "overlay.setTeamLogo") {
     setTeamLogoOverride(payload.teamName, payload.file || null);
   } else {
@@ -935,7 +967,7 @@ function placeRaceControl() {
     panel.style.setProperty("--rc-h", `${Math.max(table.offsetHeight - titleH, RC_MIN_PANEL_H)}px`);
   }
   if (!tag.hidden) {
-    const hasTrack = !track.classList.contains("no-track");
+    const hasTrack = !track.classList.contains("no-track") && !track.classList.contains("rc-joined");
     tag.style.top = `${table.offsetTop}px`;
     tag.style.left = `${table.offsetLeft + table.offsetWidth + (hasTrack ? track.offsetWidth : 0)}px`;
   }
@@ -951,21 +983,11 @@ function classColor(carClass) {
   return LLGDisplay.classColor(carClass, rltEnabled() ? rltConfig.classes : null);
 }
 
+// Texto preto ou branco sobre uma cor: a mesma regra das linhas de disputa e
+// das outras overlays (shared/colors.js), para o numero da posicao e o nome
+// do piloto nunca ficarem um branco e o outro preto na mesma cor.
 function contrastText(bg) {
-  if (!bg) return "#fff";
-  const s = String(bg).trim();
-  const hsl = s.match(/hsl\(\s*[\d.]+\s*,\s*[\d.]+%\s*,\s*([\d.]+)%\s*\)/i);
-  if (hsl) return Number(hsl[1]) > 55 ? "#000" : "#fff";
-  let hex = s.replace("#", "");
-  if (hex.length === 3) hex = hex.split("").map((c) => c + c).join("");
-  if (hex.length === 8) hex = hex.slice(0, 6);
-  if (hex.length !== 6) return "#fff";
-  const r = parseInt(hex.slice(0, 2), 16) / 255;
-  const g = parseInt(hex.slice(2, 4), 16) / 255;
-  const b = parseInt(hex.slice(4, 6), 16) / 255;
-  const lin = (c) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
-  const L = 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-  return L > 0.45 ? "#000" : "#fff";
+  return bg ? LLGColors.readableOnColor(bg) : "#fff";
 }
 
 function sortByTiming(a, b) {
@@ -1474,6 +1496,11 @@ function currentPageLabel(standings) {
 }
 
 let standingsView = false; // pontuacao pedida (tecla 0, painel ou alternancia automatica)
+
+// Fora da sessao (sem carros) a tabela some, menos com a pontuacao na tela.
+function updateSessionVisibility() {
+  document.body.classList.toggle("no-session", !latestStandings.length && !showingStandings());
+}
 
 // A tela de pontuacao so existe com temporada do RLT aplicada. Sem ela, o
 // pedido e ignorado e a tabela de tempos continua na tela.
@@ -2076,6 +2103,7 @@ function render(standings) {
 }
 
 function renderNow(standings) {
+  updateSessionVisibility(); // a pontuacao pode ter sido ligada ou desligada
   // game-lmu: so abre espaco a esquerda no modo ?clock=left (ver CSS)
   document.getElementById("timing-table").classList.toggle("game-lmu", latestGame === "lmu" && !showingStandings());
   updateBattles(standings); // antes de montar a tabela: define destaque e trava do rodizio
@@ -2328,7 +2356,8 @@ function renderTable(standings) {
 
     const change = positionChange(entry, isClassMode, groupRanks);
     const finished = entry.raceState === 3;
-    el.classList.toggle("finished", !!finished && isRaceSession());
+    // quadriculado de quem recebeu a bandeirada: na corrida e na classificacao (estado 3)
+    el.classList.toggle("finished", !!finished && (isRaceSession() || Number(latestSessionState) === 3));
 
     // quem abandonou nao tem mais posicao: a coluna da direita ja mostra DNF
     posEl.textContent = isDnf(entry) ? "—" : item.displayPosition;

@@ -46,10 +46,16 @@ $SC_NUM_VEHICLES      = 104       # long
 $SC_GAME_PHASE        = 108       # uchar: 3=volta de formacao 5=verde 6=bandeira amarela geral/safety car 8=fim
 $SC_SECTOR_FLAGS      = 110       # schar[3] lido sem sinal (255 = -1, invalido): bandeira amarela local por setor; a ordem dos setores nao e documentada
 $SC_TIME_REMAINING    = 340       # float, segundos
+$SC_GAME_MODE         = 284       # uchar: 0=sozinho (offline) 1=servidor 2=cliente 3=servidor e cliente
 # clima (ScoringInfoV01, depois de mPlrFileName): doubles
 $SC_RAINING           = 220       # 0 a 1
 $SC_AMBIENT_TEMP      = 228       # graus Celsius
 $SC_TRACK_TEMP        = 236       # graus Celsius
+
+# fluxo de resultados: as linhas que o jogo acrescentou desde a ultima atualizacao
+# (as mesmas do Results\*.xml), ex: <Penalty Driver="..." ID="12" Penalty="Stop/Go" .../>
+$SCORING_STREAM_SIZE  = 2184      # size_t, logo antes de vehScoringInfo
+$SCORING_STREAM       = 62928     # char[65536], depois dos 104 VehicleScoringInfoV01
 
 $VEH                  = 2192      # VehicleScoringInfoV01[104]
 $VEH_SIZE             = 584
@@ -115,6 +121,66 @@ $LOCK_BUSY            = 4
 $SESSION_LABELS = @{ 1="TREINO LIVRE"; 2="TESTE"; 3="CLASSIFICACAO"; 4="VOLTA DE FORMACAO"; 5="CORRIDA" }
 
 $maxSpeedKmh = @{}
+
+# Punicoes pendentes de cada piloto, com o tipo. A Shared Memory so informa
+# QUANTAS ha (mNumPenalties); o tipo vem das linhas <Penalty> do fluxo de
+# resultados, que trazem a fila inteira do piloto no fim, por exemplo:
+#   "Patrick Texas received Stop/Go penalty, 10s, 0laps for ... Result: penalties=1, 1st=Stop/Go,10s"
+#   "Adam Dorner#6101 served 1st Drive Thru penalty, result: penalties=0, 1st=Drive Thru,10s"
+# Tipos do LMU: Stop/Go, Drive Thru, Time (tempo somado, ex: +10s) e Disqualify.
+# Chave: o nome do piloto sem o codigo da conta ("#1005"), em minusculas.
+$penaltyState = @{}
+$lastPenaltyStream = ""
+
+function Get-PenaltyKey($name) {
+    return (($name -replace '\s*#\d+\s*$', '').Trim()).ToLowerInvariant()
+}
+
+function Read-PenaltyStream($src) {
+    $n = [BitConverter]::ToUInt64($src, $SCORING_STREAM_SIZE)
+    if ($n -eq 0 -or $n -gt 65536) { return }
+    $text = [System.Text.Encoding]::UTF8.GetString($src, $SCORING_STREAM, [int]$n)
+    # a mesma atualizacao lida duas vezes (o jogo atualiza a cada ~200 ms) nao conta de novo
+    if ($text -eq $script:lastPenaltyStream) { return }
+    $script:lastPenaltyStream = $text
+    foreach ($m in [regex]::Matches($text, '<Penalty(\s[^>]*)?>([^<]*)</Penalty>')) {
+        $body = [System.Net.WebUtility]::HtmlDecode($m.Groups[2].Value)
+        $who = [regex]::Match($body, '^(.+?) (received|served) ')
+        $res = [regex]::Match($body, '(?i)result: penalties=(\d+)(.*)$')
+        if (-not $who.Success -or -not $res.Success) { continue }
+        $list = New-Object System.Collections.Generic.List[object]
+        foreach ($e in [regex]::Matches($res.Groups[2].Value, '\d+(?:st|nd|rd|th)=([^,]+),(\d+)s')) {
+            $type = switch -Regex ($e.Groups[1].Value) {
+                '(?i)stop' { "stopGo"; break }
+                '(?i)drive' { "driveThrough"; break }
+                '(?i)disq' { "disqualify"; break }
+                '(?i)time' { "time"; break }
+                default { "other" }
+            }
+            $list.Add(@{ type = $type; seconds = [int]$e.Groups[2].Value })
+        }
+        $script:penaltyState[(Get-PenaltyKey $who.Groups[1].Value)] = @{ pending = [int]$res.Groups[1].Value; queue = $list }
+    }
+}
+
+# A proxima punicao a cumprir ({ type, seconds }), ou $null quando nao se sabe
+# (dada antes de o listener abrir, ou sem mensagem no fluxo)
+function Get-PenaltyInfo($name, $count) {
+    $key = Get-PenaltyKey $name
+    $st = $script:penaltyState[$key]
+    if (-not $st) { return $null }
+    if ($count -le 0) { $script:penaltyState.Remove($key); return $null }
+    # cumpriu alguma sem a mensagem chegar: sai da frente da fila
+    while ($st.pending -gt $count) {
+        if ($st.queue.Count -gt 0) { $st.queue.RemoveAt(0) }
+        $st.pending--
+    }
+    # ganhou outra sem a mensagem chegar: a fila conhecida nao vale mais
+    if ($st.pending -lt $count -or $st.queue.Count -eq 0) { return $null }
+    $first = $st.queue[0]
+    if ($first.type -eq "other") { return $null }
+    return $first
+}
 
 function Read-CString($src, $offset, $maxLen) {
     $nullIndex = [Array]::IndexOf($src, [byte]0, $offset, $maxLen)
@@ -242,7 +308,9 @@ while ($true) {
                 if ($sessionKey -ne $lastSessionKey) {
                     $lastSessionKey = $sessionKey
                     $maxSpeedKmh.Clear()
+                    $penaltyState.Clear()
                 }
+                Read-PenaltyStream $buf
 
                 # telemetria: indice por slot, para casar com a pontuacao
                 $telemBySlot = @{}
@@ -262,6 +330,7 @@ while ($true) {
                     $slot = [BitConverter]::ToInt32($buf, $v + $V_ID)
                     # sem o codigo da conta do online ("Felipe Antunes#1005" -> "Felipe Antunes")
                     $name = (Read-CString $buf ($v + $V_DRIVER_NAME) 32) -replace '\s*#\d+\s*$', ''
+                    $penInfo = Get-PenaltyInfo $name ([int][BitConverter]::ToInt16($buf, $v + $V_NUM_PENALTIES))
                     $vehicleName = Read-CString $buf ($v + $V_VEHICLE_NAME) 64
                     $carClass = Read-CString $buf ($v + $V_VEHICLE_CLASS) 32
                     $laps = [int][BitConverter]::ToInt16($buf, $v + $V_TOTAL_LAPS)
@@ -393,6 +462,8 @@ while ($true) {
                         lastImpactMag = $lastImpactMag
                         pitStops      = [int][BitConverter]::ToInt16($buf, $v + $V_NUM_PITSTOPS)
                         penalties     = [int][BitConverter]::ToInt16($buf, $v + $V_NUM_PENALTIES)
+                        penaltyType   = if ($penInfo) { $penInfo.type } else { $null }
+                        penaltySeconds = if ($penInfo) { $penInfo.seconds } else { $null }
                         fuelL         = $fuelL
                         tyreFront     = $tyreFront
                         tyreRear      = $tyreRear
@@ -422,6 +493,7 @@ while ($true) {
                         ambientTempC     = [math]::Round([BitConverter]::ToDouble($buf, $SCORING + $SC_AMBIENT_TEMP), 1)
                         trackTempC       = [math]::Round([BitConverter]::ToDouble($buf, $SCORING + $SC_TRACK_TEMP), 1)
                         rain             = [math]::Round([BitConverter]::ToDouble($buf, $SCORING + $SC_RAINING), 2)
+                        online           = ([int]$buf[$SCORING + $SC_GAME_MODE] -ne 0)
                     }
                     standings = @($standings | Sort-Object position)
                 }

@@ -6,6 +6,11 @@ html, body {
   color: #fff;
 }
 
+/* fora da sessao (jogo no menu, sem carros) a overlay inteira some, como o
+   driver card. Opacidade em vez de display/visibility: as medidas da tabela
+   continuam valendo e nenhum filho com visibility: visible escapa. */
+body.no-session { opacity: 0; }
+
 #timing-table {
   --table-opacity: 1;
   --row-opacity: 1;
@@ -81,9 +86,10 @@ html, body {
 /* safety car / FCY: animacao em shared/racecontrol.css. Aqui, a etiqueta fica ao lado da pista */
 #rcPanel, #rcTag { position: absolute; }
 
-/* com a etiqueta ao lado, a da pista perde o canto arredondado */
+/* safety car / FCY na pista: o nome da pista sai e fica so a etiqueta do
+   Race Control, encostada na tabela */
 #trackTag.rc-joined {
-  border-radius: 0;
+  display: none;
 }
 
 /* ---- cabecalho, no estilo do GT World Challenge, nos tons de azul da tabela ----

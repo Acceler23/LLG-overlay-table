@@ -182,6 +182,7 @@ test("nome da pista colado do AMS2: separa as palavras, tira o ano e nao repete 
   assert.deepEqual(display.trackDisplay("SpaFrancorchamps", "Spa_Francorchamps_2022"), { name: "Spa Francorchamps", layout: "" });
   assert.deepEqual(display.trackDisplay("CampoGrande", "CampoGrande"), { name: "Campo Grande", layout: "" });
   assert.deepEqual(display.trackDisplay("Nurburgring", "Nordschleife_2020"), { name: "Nurburgring", layout: "Nordschleife" });
+  assert.deepEqual(display.trackDisplay("Nurburgring_2020", "Nurb_1971_Gesamt"), { name: "Nurburgring", layout: "Nurb 1971 Gesamt" });
   assert.deepEqual(display.trackDisplay("Interlagos", "GP"), { name: "Interlagos", layout: "GP" });
   assert.deepEqual(display.trackDisplay("Interlagos", "Interlagos_GP"), { name: "Interlagos", layout: "GP" });
 });
@@ -189,6 +190,9 @@ test("nome da pista colado do AMS2: separa as palavras, tira o ano e nao repete 
 test("penaltyLabel: DT e SG no AMS2, PEN com a quantidade no LMU, vazio sem punicao", () => {
   assert.equal(display.penaltyLabel({ penaltyType: "driveThrough", penalties: 1 }), "DT");
   assert.equal(display.penaltyLabel({ penaltyType: "stopGo" }), "SG");
+  assert.equal(display.penaltyLabel({ penaltyType: "stopGo", penalties: 2 }), "SG x2"); // LMU: a proxima e SG, ha mais uma
+  assert.equal(display.penaltyLabel({ penaltyType: "time", penaltySeconds: 10, penalties: 1 }), "+10s"); // LMU: punicao de tempo
+  assert.equal(display.penaltyLabel({ penaltyType: "disqualify", penalties: 1 }), "DQ");
   assert.equal(display.penaltyLabel({ penalties: 1 }), "PEN");
   assert.equal(display.penaltyLabel({ penalties: 3 }), "PEN x3");
   assert.equal(display.penaltyLabel({ penalties: 0 }), "");

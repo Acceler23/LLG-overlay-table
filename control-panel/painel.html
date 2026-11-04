@@ -35,6 +35,12 @@
     <button class="back" id="btnBack" onclick="voltar()" title="Voltar" hidden>◀</button>
     <div class="brand" id="brand"><img src="logo.png" alt="Liga Let's Go" /></div>
     <div class="title" id="screenTitle">LLG Overlay</div>
+    <!-- temporada do RLT: sempre no topo, em todas as telas. Trocar ja aplica (panel.js) -->
+    <label class="season-pick" id="seasonPick" title="Temporada do Racing League Tools: nomes, equipes, classes e pontos">
+      <span class="lbl">Temporada</span>
+      <select id="rltSeason" onchange="applySeason()"><option value="">Sem temporada</option></select>
+      <span class="season-state" id="seasonState" hidden></span>
+    </label>
     <div class="spacer"></div>
     <span class="chip" id="chipGame" title="Jogo que o LLG Overlay está lendo"><i class="dot"></i><span>Sem jogo</span></span>
     <span class="chip opt" id="chipObs" title="OBS Studio" hidden><i class="dot"></i><span>OBS</span></span>
@@ -56,6 +62,12 @@
           <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="m16 10 6-3v10l-6-3"/></svg>
           <span class="t">Transmitir</span>
           <span class="s">Overlays no OBS</span>
+        </button>
+        <!-- pinturas da liga (carsets do AMS2): valem para quem pilota e para quem transmite -->
+        <button class="tile span-2" id="tilePinturas" onclick="ir('pinturas')">
+          <span class="t">Pinturas</span>
+          <span class="state sm" id="pinturasEstado">—</span>
+          <span class="s" id="pinturasResumo">Carsets da liga</span>
         </button>
         <button class="tile span-2 warn" id="homeDirecao" onclick="escolherModo('direcao')" hidden>
           <span class="t">Direção de prova</span>
@@ -93,14 +105,9 @@
             <button class="ovrow" id="rowSpotter" onclick="alternarEng('spotter')"><span><b>Spotter</b><small>Esquerda, direita, livre</small></span><span class="toggle"><i></i></span></button>
           </div>
         </div>
-        <button class="tile big" id="tilePinturas" onclick="ir('pinturas')">
-          <span class="t">Pinturas</span>
-          <span class="state sm" id="pinturasEstado">—</span>
-          <span class="s" id="pinturasResumo">Carsets da liga</span>
-        </button>
       </div>
       <p class="hint center-text" id="pilotHint">O jogo precisa estar em <b>janela sem bordas</b>. Em tela cheia exclusiva as overlays não aparecem.</p>
-      <div class="tile off" id="pilotNoApp" hidden style="min-height:auto"><span class="t">Abra pelo aplicativo</span><span class="s">As overlays por cima do jogo só existem no aplicativo LLG Overlay. Aqui no navegador dá para usar o Engenheiro, as Pinturas e os Ajustes.</span></div>
+      <div class="tile off" id="pilotNoApp" hidden style="min-height:auto"><span class="t">Abra pelo aplicativo</span><span class="s">As overlays por cima do jogo só existem no aplicativo LLG Overlay. Aqui no navegador dá para usar o Engenheiro e os Ajustes.</span></div>
     </section>
 
     <!-- ============================================================ PINTURAS -->
@@ -379,11 +386,9 @@
           <div class="pane" data-cat="liga">
             <div class="card">
               <h3>Temporada</h3>
-              <p class="lead">Nomes, equipes, classes e pontuação do Racing League Tools. Fica lembrada.</p>
+              <p class="lead">Nomes, equipes, classes e pontuação do Racing League Tools. Escolha no topo do painel; fica lembrada.</p>
               <div class="row">
-                <select id="rltSeason"><option value="">Sem temporada (só dados do jogo)</option></select>
-                <button class="btn primary" onclick="applySeason()">Aplicar</button>
-                <button class="btn" onclick="reloadSeasons()" title="Busca a lista de novo">↻</button>
+                <button class="btn" onclick="reloadSeasons()" title="Busca a lista de novo">↻ Buscar as temporadas de novo</button>
               </div>
               <div id="rltClasses"></div>
             </div>

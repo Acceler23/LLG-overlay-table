@@ -237,7 +237,8 @@
     if (full != null) return { name: full, layout: "" };
     let mapped = lookup(loc);
     if (mapped == null) mapped = contains(loc);
-    const name = mapped != null ? mapped : tidy(loc);
+    // sem entrada na lista, o ano no fim tambem sai do nome ("Nurburgring_2020" -> "Nurburgring")
+    const name = mapped != null ? mapped : tidy(loc).replace(/\s*\b(19|20)\d\d$/, "").trim() || tidy(loc);
     // tracado sem o ano no fim ("Spa_Francorchamps_2022" -> "Spa Francorchamps"),
     // e escondido quando e so o nome da pista de novo
     let layout = tidy(lay).replace(/\s*\b(19|20)\d\d$/, "").trim();
@@ -333,12 +334,22 @@
 
   // Arquivo da bandeira no repositorio de imagens (pasta country/): o nome do
   // pais como o RLT informa, em minusculas, com "_" no lugar dos espacos.
-  // Etiqueta de punicao pendente: DT (drive-through) ou SG (stop & go) no AMS2;
-  // no LMU o jogo so informa quantas ha (PEN, ou PEN x2). Sem punicao: "".
-  const PENALTY_SHORT = { driveThrough: "DT", stopGo: "SG" };
+  // Etiqueta de punicao pendente: DT (drive-through) ou SG (stop & go), a proxima
+  // a cumprir. O AMS2 informa o tipo; o LMU so a quantidade, e o tipo vem da linha
+  // <Penalty> do fluxo de resultados (listener-lmu.ps1). Com mais de uma, a
+  // quantidade junto (SG x2). Sem o tipo: PEN (ou PEN x2). Sem punicao: "".
+  // No LMU ha tambem punicao de tempo (somado ao resultado: "+10s") e desclassificacao (DQ).
+  const PENALTY_SHORT = { driveThrough: "DT", stopGo: "SG", disqualify: "DQ" };
+  function penaltyShort(entry) {
+    if (entry.penaltyType === "time") return entry.penaltySeconds > 0 ? `+${entry.penaltySeconds}s` : "+T";
+    return PENALTY_SHORT[entry.penaltyType] || "";
+  }
   function penaltyLabel(entry) {
     if (!entry) return "";
-    if (entry.penaltyType && PENALTY_SHORT[entry.penaltyType]) return PENALTY_SHORT[entry.penaltyType];
+    if (entry.penaltyType && penaltyShort(entry)) {
+      const short = penaltyShort(entry);
+      return entry.penalties > 1 ? `${short} x${entry.penalties}` : short;
+    }
     if (entry.penalties > 0) return entry.penalties > 1 ? `PEN x${entry.penalties}` : "PEN";
     return "";
   }

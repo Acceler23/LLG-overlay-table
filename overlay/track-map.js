@@ -165,7 +165,8 @@ function render() {
 function renderNow() {
   const root = document.getElementById("tm");
   if (typeof HEADER_COLOR !== "undefined" && HEADER_COLOR) root.style.setProperty("--header-color", HEADER_COLOR);
-  if (!session) {
+  // fora da sessao (jogo no menu) o jogo manda a lista de carros vazia: o mapa some
+  if (!session || !standings.length) {
     root.classList.add("hidden");
     return;
   }

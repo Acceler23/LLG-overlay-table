@@ -2,15 +2,26 @@
 // Mapa da pista aprendido com as posicoes dos carros (overlay/track-map.html).
 //
 // A volta e dividida em trechos (ate 500 por pista). Para cada trecho ficam as
-// posicoes (X, Z do mundo) das ultimas passagens, e o ponto do mapa e a
-// MEDIANA delas: uma rodada, um carro fora da pista ou uma leitura errada nao
-// deformam o desenho. Passagens que nao contam:
+// posicoes (X, Z do mundo) das ultimas passagens de todos os carros, e o ponto
+// do mapa e a MEDIA delas sem as mais distantes (media aparada: tira um quarto
+// de cada ponta). Uma rodada, um carro fora da pista ou uma leitura errada nao
+// deformam o desenho, e com varias passagens o ponto fica no meio da pista em
+// vez de seguir um carro so. Depois, cada ponto e suavizado com os dois
+// vizinhos, para a linha nao ondular. Passagens que nao contam:
 //   - carro lento (rodada, acidente, carro parado): abaixo de MIN_SPEED_MS
-//   - carro no box ou volta invalidada (corte de pista)
+//   - carro no box e na volta de saida do box (ate cruzar a linha de chegada)
+//   - volta queimada (lapInvalidated: corte de pista, limites da pista)
+//   - fora da pista: a passagem a mais de OFF_TRACK_M do meio das outras
+//     passagens daquele trecho (os jogos so informam a superficie das rodas do
+//     proprio piloto; a dos outros carros nao vem, entao vale a posicao)
 // Quando ha trechos cobertos o bastante (READY_COVERAGE), o mapa fica pronto;
 // os trechos sem passagem sao preenchidos pelos vizinhos. O mapa pronto e
 // salvo em disco (trackmaps.json na pasta de dados do aplicativo), por jogo,
 // pista e tracado: da proxima vez ele ja aparece sem precisar aprender.
+// O mapa continua aprendendo depois de pronto (tambem o que veio do arquivo):
+// quando as passagens por trecho crescem (samples), ele e trocado e salvo de
+// novo, ate MAX_SAMPLES. Assim um mapa feito com poucas voltas no comeco do
+// treino melhora sozinho quando a pista enche.
 // Onde cada setor comeca (map.sectors, para pintar o setor sob amarela) e
 // aprendido a parte: mediana dos metros em que os carros trocam de setor.
 
@@ -21,17 +32,29 @@ const TARGET_BUCKETS = 500; // trechos por pista (Spa: ~14 m cada)
 const MIN_BUCKET_M = 8; // maior que o que um carro rapido anda entre duas leituras do jogo
 const MAX_SAMPLES = 25; // passagens guardadas por trecho
 const MIN_SAMPLES = 3; // passagens para o trecho valer
+const REFINE_STEP = 2; // o mapa pronto so e trocado com pelo menos tantas passagens a mais por trecho
 const MIN_SPEED_MS = 20; // ~72 km/h
 const READY_COVERAGE = 0.9;
 const REBUILD_MS = 3000;
 const SAVE_DELAY_MS = 2000;
 const SECTOR_SAMPLES = 5; // trocas de setor para a fronteira valer
 const TELEPORT_HOLD_MS = 3000; // depois do box ou de um salto de posicao, o carro nao conta por este tempo
+const OFF_TRACK_M = 10; // passagem mais longe que isso do meio do trecho = fora da pista
+const OFF_TRACK_MIN_SAMPLES = 5; // passagens no trecho para ja saber onde fica o meio
 
 const median = (list) => {
   const a = list.slice().sort((x, y) => x - y);
   const m = a.length >> 1;
   return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+};
+
+// Media sem um quarto de cada ponta (com 3 ou 4 passagens, tira a mais alta e a
+// mais baixa). Cada eixo e aparado separado.
+const trimmedMean = (list) => {
+  const a = list.slice().sort((x, y) => x - y);
+  const k = a.length >= 3 ? Math.max(1, Math.floor(a.length / 4)) : 0;
+  const mid = a.slice(k, a.length - k);
+  return mid.reduce((sum, v) => sum + v, 0) / mid.length;
 };
 
 function mapKey(game, session) {
@@ -46,9 +69,18 @@ function mapKey(game, session) {
 const MAX_SHORT_GAP = 4; // buracos de ate tantos trechos contam como desenhados
 function buildPoints(buckets) {
   const n = buckets.length;
-  const points = buckets.map((b) => (b && b.length >= MIN_SAMPLES ? [median(b.map((p) => p[0])), median(b.map((p) => p[1]))] : null));
-  const filled = points.filter(Boolean).length;
-  if (!filled) return { points: [], coverage: 0, runs: [] };
+  const raw = buckets.map((b) => (b && b.length >= MIN_SAMPLES ? [trimmedMean(b.map((p) => p[0])), trimmedMean(b.map((p) => p[1]))] : null));
+  const filled = raw.filter(Boolean).length;
+  if (!filled) return { points: [], coverage: 0, runs: [], samples: 0 };
+  // suaviza com os vizinhos (1-2-1), so onde os dois vizinhos foram aprendidos
+  const points = raw.map((p, i) => {
+    const a = raw[(i - 1 + n) % n];
+    const b = raw[(i + 1) % n];
+    if (!p || !a || !b || n < 3) return p;
+    return [(a[0] + 2 * p[0] + b[0]) / 4, (a[1] + 2 * p[1] + b[1]) / 4];
+  });
+  // passagens tipicas por trecho (mediana entre os trechos aprendidos): a "qualidade" do mapa
+  const samples = median(buckets.filter((b) => b && b.length >= MIN_SAMPLES).map((b) => b.length));
   const known = points.map(Boolean);
   for (let i = 0; i < n; i++) {
     if (known[i]) continue;
@@ -89,7 +121,7 @@ function buildPoints(buckets) {
     const t = (da + 1) / (da + db + 2);
     points[i] = [pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t];
   }
-  return { points: points.map((p) => (p ? [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10] : null)), coverage: filled / n, runs };
+  return { points: points.map((p) => (p ? [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10] : null)), coverage: filled / n, runs, samples };
 }
 
 function createTrackMap(opts) {
@@ -123,11 +155,13 @@ function createTrackMap(opts) {
   function start(key, length) {
     const count = Math.max(50, Math.min(TARGET_BUCKETS, Math.floor(length / MIN_BUCKET_M)));
     lastPos.clear(); // pista nova: esquece onde cada carro estava
+    outLap.clear();
     current = { key, length, bucketM: length / count, buckets: new Array(count).fill(null), map: null, dirty: false, builtAt: 0, sectors: null, crossings: [[], []], lastSector: new Map() };
     const known = saved[key];
     if (known && Array.isArray(known.sectors) && Math.abs(known.length - length) < 1) current.sectors = known.sectors;
     if (known && known.points && known.points.length && Math.abs(known.length - length) < 1) {
-      current.map = { key, length, points: known.points, coverage: known.coverage, ready: known.coverage >= READY_COVERAGE, saved: true, sectors: current.sectors };
+      // mapas salvos antes de existir "samples" contam como feitos com o minimo
+      current.map = { key, length, points: known.points, coverage: known.coverage, ready: known.coverage >= READY_COVERAGE, saved: true, sectors: current.sectors, samples: known.samples || MIN_SAMPLES };
     }
     onChange(current.map);
   }
@@ -174,6 +208,25 @@ function createTrackMap(opts) {
     return t < cur.until;
   }
 
+  // Volta de saida do box: do box ate o carro cruzar a linha de chegada.
+  const outLap = new Map(); // carro -> { on, d }
+  function onOutLap(e, d, length) {
+    const id = e.slot != null ? `#${e.slot}` : e.name;
+    const st = outLap.get(id) || { on: false, d: null };
+    const valid = d > 0 && d < length;
+    if ((e.pitMode || 0) !== 0) st.on = true;
+    else if (st.on && valid && st.d != null && st.d - d > length / 2) st.on = false; // cruzou a linha
+    if (valid) st.d = d;
+    outLap.set(id, st);
+    return st.on;
+  }
+
+  // Fora da pista: longe do meio das passagens que o trecho ja tem
+  function offTrack(b, x, z) {
+    if (!b || b.length < OFF_TRACK_MIN_SAMPLES) return false;
+    return Math.hypot(x - median(b.map((p) => p[0])), z - median(b.map((p) => p[1]))) > OFF_TRACK_M;
+  }
+
   // Recebe o payload de um jogo. Os carros precisam de lapDistance, worldX e worldZ.
   function apply(game, payload) {
     const session = (payload && payload.session) || {};
@@ -182,22 +235,25 @@ function createTrackMap(opts) {
     const key = mapKey(game, session);
     if (!current || current.key !== key || Math.abs(current.length - length) >= 1) start(key, length);
     learnSectors((payload && payload.standings) || [], length);
-    // mapa salvo e completo: nao precisa aprender de novo
-    if (current.map && current.map.saved && current.map.ready) return;
+    // mapa pronto com o maximo de passagens por trecho: nao tem mais o que melhorar
+    if (current.map && current.map.ready && current.map.samples >= MAX_SAMPLES) return;
 
     const t = clock();
     ((payload && payload.standings) || []).forEach((e) => {
-      if (!e || typeof e.worldX !== "number" || typeof e.worldZ !== "number") return;
+      if (!e) return;
+      const d = Number(e.lapDistance);
+      // antes de tudo: o box e a volta de saida sao acompanhados mesmo nas leituras que nao contam
+      const leavingPit = onOutLap(e, d, length);
+      if (typeof e.worldX !== "number" || typeof e.worldZ !== "number") return;
       if (e.worldX === 0 && e.worldZ === 0) return; // posicao nao informada
       if (teleported(e, t)) return; // voltou para o box (ou trocou de carro): posicao saltou
-      const d = Number(e.lapDistance);
       // 0 exato: o jogo ainda nao sabe a distancia (volta de saida no AMS2), mesmo com o carro no meio da pista
       if (!(d > 0 && d < length)) return;
+      if (leavingPit) return; // box e volta de saida
       if (!(Number(e.speedMs) >= MIN_SPEED_MS)) return; // rodada, acidente, carro lento
-      if ((e.pitMode || 0) !== 0) return; // box
-      // volta invalidada conta: em treino quase toda volta de saida e invalida, e um corte de
-      // pista e uma passagem fora do lugar entre as ultimas 25 do trecho (a mediana descarta)
+      if (e.lapInvalidated === true) return; // volta queimada
       const i = Math.min(current.buckets.length - 1, Math.floor(d / current.bucketM));
+      if (offTrack(current.buckets[i], e.worldX, e.worldZ)) return; // fora da pista
       const b = current.buckets[i] || (current.buckets[i] = []);
       b.push([e.worldX, e.worldZ]);
       if (b.length > MAX_SAMPLES) b.shift();
@@ -211,9 +267,12 @@ function createTrackMap(opts) {
     const built = buildPoints(current.buckets);
     if (!built.points.length) return;
     const ready = built.coverage >= READY_COVERAGE;
-    current.map = { key, length, points: built.points, coverage: Math.round(built.coverage * 1000) / 1000, ready, saved: false, sectors: current.sectors, runs: ready ? null : built.runs };
+    // ja ha um mapa pronto (desta sessao ou do arquivo): so troca por um pronto com mais passagens
+    const have = current.map && current.map.ready ? current.map : null;
+    if (have && !(ready && built.samples >= Math.min(MAX_SAMPLES, (have.samples || MIN_SAMPLES) + REFINE_STEP))) return;
+    current.map = { key, length, points: built.points, coverage: Math.round(built.coverage * 1000) / 1000, ready, saved: false, sectors: current.sectors, runs: ready ? null : built.runs, samples: built.samples };
     if (ready) {
-      saved[key] = { length, points: built.points, coverage: current.map.coverage, updatedAt: new Date(now).toISOString(), sectors: current.sectors };
+      saved[key] = { length, points: built.points, coverage: current.map.coverage, samples: built.samples, updatedAt: new Date(now).toISOString(), sectors: current.sectors };
       save();
     }
     onChange(current.map);

@@ -235,11 +235,25 @@ function classPosition(entry, standings) {
 // velocidade ao lado. So aparece se o jogo informa os pedais do carro em foco
 // (por enquanto, o Le Mans Ultimate).
 const BATTLE_STATE_MAX_AGE_MS = 6000; // a tabela repete o aviso a cada 2 s
-let battlePage = { active: false, at: 0 };
+let battlePage = { active: false, standings: null, at: 0 };
+
+// O aviso da tabela vale enquanto ela continua mandando (a cada 2 s)
+function tableAnnounced() {
+  return Date.now() - battlePage.at <= BATTLE_STATE_MAX_AGE_MS;
+}
+
+// Pontuacao na tela: segue o que a TABELA mostra (ela avisa). Sem a tabela
+// aberta, vale o que as teclas pediram aqui mesmo. Antes o card so alternava a
+// propria copia a cada 0 e saia de sincronia (0 sem temporada, card recarregado):
+// a barra dos pedais ficava escondida ate apertar 0 de novo.
+function showingStandings() {
+  if (tableAnnounced() && typeof battlePage.standings === "boolean") return battlePage.standings;
+  return standingsView;
+}
 
 function showPedals(entry) {
-  if (!battlePage.active || Date.now() - battlePage.at > BATTLE_STATE_MAX_AGE_MS) return false;
-  if (latestSessionState !== 5 || standingsView) return false;
+  if (!battlePage.active || !tableAnnounced()) return false;
+  if (latestSessionState !== 5) return false; // a tabela ja nao liga disputas com a pontuacao na tela
   return typeof entry.throttle === "number" && typeof entry.brake === "number";
 }
 
@@ -380,7 +394,7 @@ function renderNow() {
     stats.classList.remove("pedals");
   }
   // pontuacao so com temporada do RLT aplicada
-  if (standingsView && rltConfig && rltConfig.standingsRows && rltConfig.standingsRows.length) {
+  if (showingStandings() && rltConfig && rltConfig.standingsRows && rltConfig.standingsRows.length) {
     const row = findStandingsRow(entry);
     const champPos = row && row.position != null && row.position < 999 ? row.position : "—";
     const pts = row && row.points != null ? row.points : "—";
@@ -488,16 +502,18 @@ function connect() {
         const name = msg.name;
         if (name === "overlay.battleState") {
           // aviso da tabela: pagina de disputas ligada ou desligada
-          battlePage = { active: !!(msg.payload && msg.payload.active), at: Date.now() };
+          const pl = msg.payload || {};
+          battlePage = { active: !!pl.active, standings: typeof pl.standings === "boolean" ? pl.standings : null, at: Date.now() };
+          if (battlePage.standings !== null) standingsView = battlePage.standings; // a copia daqui acompanha a tabela
           render();
         } else if (name === "overlay.toggleStandings") {
-          standingsView = !standingsView;
+          standingsView = !showingStandings();
           render();
         } else if (name === "overlay.setStandings") {
           standingsView = !!(msg.payload && msg.payload.value);
           render();
         } else if (name === "overlay.prevColumn" || name === "overlay.nextColumn") {
-          if (standingsView) {
+          if (showingStandings()) {
             if (name === "overlay.prevColumn") {
               standingsColumnIndex = (standingsColumnIndex - 1 + STANDINGS_COLUMN_MODES.length) % STANDINGS_COLUMN_MODES.length;
             } else {

@@ -126,3 +126,45 @@ test("tirar regiao: so o que esta entre os marcadores daquele carset", () => {
   assert.equal(removeRegion(xml, "a"), "<USER_OVERRIDES>\n<!-- TRANSPLANTE-CARSET:b -->\nY\n<!-- /TRANSPLANTE-CARSET:b -->\n</USER_OVERRIDES>\n");
   assert.equal(removeRegion(xml, "c"), null);
 });
+
+test("pintura igual a do carset instalada por fora: o carset assume; diferente fica de fora", () => {
+  const { root, ov, pkg, lib } = setup();
+  try {
+    // no jogo, fora dos marcadores: o Time A igualzinho (mesmo ID, nome e BODY) e,
+    // no ID 52, a pintura do piloto (outro nome e outra textura)
+    const copia = `<LIVERY_OVERRIDE LIVERY="51" NAME="Time A" BASELIVERY="51">
+  <TEXTURE NAME="BODY" PATH="antigo/body51.dds"/>
+</LIVERY_OVERRIDE>
+`;
+    write(path.join(ov, "bmw", "bmw.xml"), USER_XML.replace("</USER_OVERRIDES>", copia + "</USER_OVERRIDES>"));
+    write(path.join(ov, "bmw", "antigo", "body51.dds"), "a");
+    lib.importDir(pkg, "Liga X 2026", ov);
+
+    const r = lib.activate("Liga X 2026", ov);
+    assert.equal(r.adopted, 1);
+    assert.equal(r.applied, 1, "o Time A entra, agora pelo carset");
+    assert.ok(r.skipped.some((s) => s.includes("ID 52") && s.includes("ocupado")), "a do piloto continua intocada");
+    assert.equal(lib.info("Liga X 2026", ov).active, true);
+
+    let xml = fs.readFileSync(path.join(ov, "bmw", "bmw.xml"), "utf8");
+    assert.equal((xml.match(/ LIVERY="51"/g) || []).length, 1, "sem ID repetido");
+    assert.ok(!xml.includes("antigo/body51.dds"));
+    assert.ok(xml.includes('NAME="Minha"'));
+
+    // desligar tira o Time A (agora do carset) e deixa a do piloto
+    lib.deactivate("Liga X 2026", ov);
+    xml = fs.readFileSync(path.join(ov, "bmw", "bmw.xml"), "utf8");
+    assert.ok(!xml.includes(" LIVERY=\"51\""));
+    assert.ok(xml.includes('NAME="Minha"'));
+
+    // mesmo ID e nome, mas textura diferente: nao e a mesma pintura
+    write(path.join(ov, "bmw", "bmw.xml"), USER_XML.replace("</USER_OVERRIDES>", copia + "</USER_OVERRIDES>"));
+    write(path.join(ov, "bmw", "antigo", "body51.dds"), "outra");
+    const r2 = lib.activate("Liga X 2026", ov);
+    assert.equal(r2.adopted, 0);
+    assert.ok(r2.skipped.some((s) => s.includes("ID 51") && s.includes("ocupado")));
+    assert.ok(fs.readFileSync(path.join(ov, "bmw", "bmw.xml"), "utf8").includes("antigo/body51.dds"));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

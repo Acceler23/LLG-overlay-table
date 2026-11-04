@@ -14,6 +14,11 @@
 //   DESLIGAR  tira exatamente isso (os marcadores, o que esta entre eles e a pasta carset_<nome>)
 // As pinturas do piloto (fora dos marcadores) nunca sao tocadas, um ID de
 // pintura ja ocupado nunca e sobrescrito e o <carro>_dist.xml do jogo nunca e lido nem escrito.
+// Uma excecao: a pintura fora dos marcadores que e a MESMA do carset (mesmo ID,
+// mesmo nome e a textura BODY igual, byte a byte) e uma copia dele instalada
+// por fora (instalador antigo, a mao). Ao ligar, ela passa para dentro dos
+// marcadores, e o carset assume: desligar tira ela tambem. As texturas dessa
+// copia antiga ficam onde estavam.
 
 const fs = require("fs");
 const path = require("path");
@@ -154,6 +159,62 @@ function removeRegion(xml, sl) {
   return xml.slice(0, ini) + xml.slice(fim);
 }
 
+// Trechos [inicio, fim] do XML que estao entre marcadores de algum carset
+function regions(xml) {
+  const out = [];
+  const open = `<!-- ${TAG}:`;
+  let i = 0;
+  for (;;) {
+    const a = xml.indexOf(open, i);
+    if (a < 0) break;
+    const nameEnd = xml.indexOf(" -->", a);
+    if (nameEnd < 0) break;
+    const sl = xml.slice(a + open.length, nameEnd);
+    const close = xml.indexOf(`<!-- /${TAG}:${sl} -->`, nameEnd);
+    const b = close < 0 ? xml.length : close;
+    out.push([a, b]);
+    i = b + 1;
+  }
+  return out;
+}
+
+// Tira um trecho do XML junto com a linha em branco que ele deixaria
+function cut(xml, a, b) {
+  const lineStart = xml.lastIndexOf("\n", a - 1) + 1;
+  const ini = xml.slice(lineStart, a).trim() === "" ? lineStart : a;
+  const nl = xml.indexOf("\n", b);
+  const fim = nl >= 0 && xml.slice(b, nl).trim() === "" ? nl + 1 : b;
+  return xml.slice(0, ini) + xml.slice(fim);
+}
+
+function sameFile(a, b) {
+  try {
+    const sa = fs.statSync(a);
+    const sb = fs.statSync(b);
+    if (!sa.isFile() || !sb.isFile() || sa.size !== sb.size) return false;
+    return fs.readFileSync(a).equals(fs.readFileSync(b));
+  } catch (_) {
+    return false;
+  }
+}
+
+// A pintura do jogo (fora dos marcadores) com o ID de `mine` e uma copia dela?
+// Devolve [inicio, fim] do bloco no XML do jogo, ou null.
+//   gameCar: pasta do carro no jogo; base: pasta do xml do carset
+function findCopy(car, xml, mine, gameCar, base) {
+  const inside = regions(xml);
+  const myBody = elements(mine.block).find((e) => e.nome === "BODY");
+  if (!myBody) return null;
+  for (const [a, b, c] of blocks(xml)) {
+    if (inside.some(([ra, rb]) => a >= ra && a < rb)) continue;
+    const l = livery(car, xml.slice(a, b), c);
+    if (!l || l.id !== mine.id || l.name.toLowerCase() !== mine.name.toLowerCase()) continue;
+    const body = elements(l.block).find((e) => e.nome === "BODY");
+    if (body && sameFile(join(gameCar, body.path), join(base, myBody.path))) return [a, b];
+  }
+  return null;
+}
+
 function insertBeforeEnd(xml, part) {
   const p = xml.lastIndexOf("</USER_OVERRIDES>");
   return p >= 0 ? `${xml.slice(0, p)}${part}\n${xml.slice(p)}` : `${HEADER}${part}\n${FOOTER}`;
@@ -280,7 +341,7 @@ function createLibrary(libDir) {
     deactivate(name, overrides);
     const sl = slug(name);
     const texDir = `carset_${sl}`;
-    const report = { applied: 0, skipped: [], warnings: [] };
+    const report = { applied: 0, adopted: 0, skipped: [], warnings: [] };
     for (const { car, file } of xmls(name)) {
       const gameCar = path.join(overrides, car);
       if (!fs.existsSync(gameCar)) {
@@ -298,8 +359,15 @@ function createLibrary(libDir) {
       for (const l of liveriesOf(car, fs.readFileSync(file, "utf8"))) {
         const label = `${car} ID ${l.id} (${l.name})`;
         if (taken.includes(l.id)) {
-          report.skipped.push(`${label}: ID ja ocupado no jogo`);
-          continue;
+          // a mesma pintura, instalada por fora: o carset assume (sai de la e entra nos marcadores)
+          const copy = findCopy(car, current, l, gameCar, base);
+          if (!copy) {
+            report.skipped.push(`${label}: ID ja ocupado no jogo`);
+            continue;
+          }
+          current = cut(current, copy[0], copy[1]);
+          taken.splice(taken.indexOf(l.id), 1);
+          report.adopted++;
         }
         const body = elements(l.block).find((e) => e.nome === "BODY");
         if (!body || !fs.existsSync(join(base, body.path))) {

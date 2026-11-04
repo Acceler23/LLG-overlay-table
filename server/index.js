@@ -14,6 +14,7 @@ require("./env").loadEnv();
 const { createWsServer } = require("./wsServer");
 const { startTcpBridge } = require("./tcpBridge");
 const { connectObs } = require("./obsController");
+const { createRltGate } = require("./rltGate");
 const { createRaceState } = require("./raceState");
 const rlt = require("./rltClient");
 const settings = require("./settings");
@@ -329,6 +330,26 @@ rlt.setManualLinks(manualLinks);
 let sessionNames = [];
 let linkStatus = { season: null, unmatched: [], ignored: [], linked: [], free: [] };
 
+// ---- RLT so em sessao da liga (regra em server/rltGate.js) ----
+const rltGate = createRltGate({
+  hasSeason: () => !!rlt.getOverlayPayload(),
+  linkedCount: () => linkStatus.linked.length,
+  onChange: (live, why) => {
+    console.log(live ? `RLT ligado: sessao da liga (${why})` : `RLT pausado: sessao fora da liga (${why}); so dados do jogo`);
+    broadcastRlt();
+  },
+});
+const refreshRltLive = () => rltGate.refresh();
+const noteGameSession = (data) => rltGate.noteSession(data);
+
+// O que as overlays recebem: a temporada inteira numa sessao da liga; fora
+// dela, so o aviso de que ha uma temporada pausada (o painel mostra o nome).
+function rltPayloadForOverlays() {
+  const cfg = rlt.getOverlayPayload();
+  if (!cfg || rltGate.isLive()) return cfg;
+  return { seasonId: cfg.seasonId, paused: true, pausedSeasonName: cfg.seasonName || null };
+}
+
 function ingameMapFromConfig() {
   // RLT_INGAME_MAP do drivers-config.js (le o arquivo, como o navegador faz)
   try {
@@ -345,6 +366,7 @@ function updateLinkStatus() {
   if (!cfg) {
     linkStatus = { season: null, unmatched: [], ignored: [], linked: [], free: [] };
     rlt.setFastRefresh(false);
+    refreshRltLive();
     return;
   }
   const matcher = LLGNames.createMatcher(LLGNames.buildPool(cfg), {
@@ -363,6 +385,7 @@ function updateLinkStatus() {
   // alguem na pista sem ligacao: rele o RLT mais vezes, so os perfis de quem falta
   const freeIds = st.freeDrivers.map((d) => d.driverId).filter((x) => x != null);
   rlt.setFastRefresh(st.unmatched.length > 0, freeIds);
+  refreshRltLive();
 }
 
 // nomes da sessao atual (sem os caracteres invisiveis de nomes repetidos)
@@ -409,7 +432,7 @@ app.post("/api/links", (req, res) => {
 let classMatcher = null;
 let classMatcherFor = null;
 function sessionLogClassOf(entry) {
-  const cfg = rlt.getOverlayPayload();
+  const cfg = rltGate.isLive() ? rlt.getOverlayPayload() : null;
   if (!cfg || !cfg.classes || !cfg.classes.length) return entry.carClass || "—";
   if (classMatcherFor !== cfg) {
     classMatcherFor = cfg;
@@ -426,8 +449,7 @@ function sessionLogPayload() {
 }
 
 function broadcastRlt() {
-  const payload = rlt.getOverlayPayload();
-  wss.broadcast({ type: "rltConfig", data: payload });
+  wss.broadcast({ type: "rltConfig", data: rltPayloadForOverlays() });
 }
 
 rlt.onRefresh(() => {
@@ -477,7 +499,7 @@ setInterval(() => wss.broadcast({ type: "hello", buildId: overlayBuildId(), pane
 
 wss.onConnect((socket) => {
   if (socket.readyState === 1) socket.send(JSON.stringify({ type: "hello", buildId: overlayBuildId(), panelBuildId: panelBuildId() }));
-  const payload = rlt.getOverlayPayload();
+  const payload = rltPayloadForOverlays();
   if (payload && socket.readyState === 1) {
     socket.send(JSON.stringify({ type: "rltConfig", data: payload }));
   }
@@ -1003,11 +1025,13 @@ app.post("/api/rlt/season", async (req, res) => {
     if (seasonId == null || seasonId === "" || Number(seasonId) === 0) {
       const payload = rlt.clearSeason();
       settings.set("seasonId", null);
+      updateLinkStatus(); // ja decide se a sessao atual e da liga
       broadcastRlt();
       return res.json({ ok: true, payload, status: rlt.getStatus(), mode: "game-only" });
     }
     const payload = await rlt.selectSeason(seasonId);
     settings.set("seasonId", Number(seasonId));
+    updateLinkStatus(); // ja decide se a sessao atual e da liga
     broadcastRlt();
     res.json({ ok: true, payload, status: rlt.getStatus() });
   } catch (e) {
@@ -1075,6 +1099,7 @@ function handleGamePayload(payload) {
     console.error("Engenheiro:", err.message);
   }
   noteSessionNames(data && data.standings);
+  noteGameSession(data); // RLT so em sessao da liga
   if (data && sessionLog.apply(data)) wss.broadcast(sessionLogPayload());
   if (data) trackMap.apply(data.game, data); // aprende o mapa da pista (overlay/track-map.html)
   // ACC: limite de stint escolhido no painel (0 = sem limite)

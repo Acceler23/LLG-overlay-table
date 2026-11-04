@@ -26,6 +26,7 @@ socket.addEventListener("message", async (ev) => {
   const id = String(msg.data.seasonId);
   if (!Array.from(sel.options).some((o) => o.value === id)) await reloadSeasons();
   sel.value = id;
+  if (msg.data.paused) return; // temporada pausada (sessao fora da liga): as classes e logos continuam as da ultima vez
   renderClasses(msg.data.classes || []);
   renderTeamLogos(msg.data.standingsRows || []);
 });
@@ -840,7 +841,7 @@ async function api(path, opts = {}) {
 function renderSeasons(seasons) {
   const sel = document.getElementById("rltSeason");
   const cur = sel.value;
-  sel.innerHTML = '<option value="">— só dados do jogo (sem season) —</option>';
+  sel.innerHTML = '<option value="">Sem temporada</option>';
   (seasons || []).forEach((s) => {
     const opt = document.createElement("option");
     opt.value = s.seasonId;
@@ -989,7 +990,7 @@ async function clearRlt() {
   try {
     await api("/api/rlt/clear", { method: "POST", body: "{}" });
     document.getElementById("rltKey").value = "";
-    document.getElementById("rltSeason").innerHTML = '<option value="">— só dados do jogo (sem season) —</option>';
+    document.getElementById("rltSeason").innerHTML = '<option value="">Sem temporada</option>';
     document.getElementById("rltClasses").innerHTML = "";
     document.getElementById("rltStatus").textContent = "";
     renderTeamLogos([]);
