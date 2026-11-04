@@ -1,0 +1,136 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: transparent;
+  font-family: "Segoe UI", Arial, sans-serif;
+  color: #fff;
+  overflow: hidden;
+}
+
+body.hidden #card { display: none; }
+
+#card {
+  width: 300px;
+  padding: 10px 12px 10px;
+  border-radius: 6px;
+  background: rgba(10, 14, 22, calc(0.86 * var(--llg-bg, 1)));
+  box-shadow: 0 4px 18px rgba(0, 0, 0, calc(0.45 * var(--llg-bg, 1)));
+  transition: opacity 0.3s;
+}
+
+/* sem dado do carro em foco: apagado */
+#card.idle { opacity: 0.35; }
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.pos {
+  min-width: 34px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #fff;
+  color: #0a0e16;
+  font-weight: 800;
+  font-size: 16px;
+  text-align: center;
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.badge {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  background: rgba(255, 255, 255, 0.14);
+}
+.badge.telemetry { background: #1e8f4e; }
+
+canvas {
+  display: block;
+  width: 240px;
+  height: 240px;
+  margin: 0 auto;
+}
+
+/* luzes de acelerador e freio; a barra dentro mostra quanto do pedal */
+.pedals {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 8px;
+}
+.light {
+  position: relative;
+  height: 26px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  transition: box-shadow 0.08s, border-color 0.08s;
+}
+.light .fill {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 0;
+  transition: width 0.08s;
+}
+.light .txt {
+  position: relative;
+  display: block;
+  line-height: 24px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+  opacity: 0.45;
+}
+.light.on .txt { opacity: 1; }
+.light.thr .fill { background: #1fbf6a; }
+.light.brk .fill { background: #e53935; }
+.light.thr.on { border-color: #3ddc84; box-shadow: 0 0 10px rgba(61, 220, 132, 0.7); }
+.light.brk.on { border-color: #ff5a5a; box-shadow: 0 0 10px rgba(255, 90, 90, 0.75); }
+/* deduzidas (sem pedal do jogo): so acende ou apaga, sem a barra parcial */
+.pedals.estimated .light.on .fill { width: 100% !important; }
+
+.vals {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+  text-align: center;
+}
+
+.val { display: flex; flex-direction: column; line-height: 1.1; }
+.lbl { font-size: 9px; font-weight: 700; letter-spacing: 0.6px; opacity: 0.65; }
+.num { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.side { min-height: 12px; font-size: 10px; font-weight: 600; opacity: 0.8; }
+.num.brake { color: #ff5a5a; }
+.num.accel { color: #3ddc84; }
+
+.peaks, .laps {
+  margin-top: 6px;
+  font-size: 11px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.8;
+}
+.laps { opacity: 0.95; }
+.peaks:empty, .laps:empty { display: none; }
+
+/* versao do piloto (?piloto=1, janela por cima do jogo): so a forca G, sem as luzes dos pedais */
+.piloto .pedals { display: none; }
+#card[hidden] { display: none; }

@@ -22,7 +22,10 @@
   const hasDom = typeof document !== "undefined";
   if (hasDom) {
     const style = document.createElement("style");
-    style.textContent = ".fps-capped *, .fps-capped *::before, .fps-capped *::after { transition: none !important; animation: none !important; }";
+    // escondida no OBS: animacoes paradas tambem (nada e desenhado enquanto ninguem ve)
+    style.textContent =
+      ".fps-capped *, .fps-capped *::before, .fps-capped *::after { transition: none !important; animation: none !important; }" +
+      ".obs-hidden *, .obs-hidden *::before, .obs-hidden *::after { animation-play-state: paused !important; }";
     (document.head || document.documentElement).appendChild(style);
   }
   const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
@@ -40,8 +43,30 @@
     applyClass();
   }
 
+  // Fonte escondida no OBS: a pagina continua recebendo e calculando (historico dos intervalos,
+  // setores, mapa), mas nao desenha nada. Cada fonte de navegador do OBS e um navegador inteiro, e
+  // desenhar uma overlay que ninguem ve custava de 9% a 21% de um nucleo por fonte num PC no limite.
+  // Quando a fonte aparece de novo, o ultimo desenho pendente roda na hora, com os dados atuais.
+  // O OBS avisa pelo evento obsSourceVisibleChanged (so existe dentro do OBS; fora dele, nunca pausa).
+  let hidden = false;
+  const pending = new Map(); // fn -> args do ultimo desenho pedido enquanto escondida
+  if (typeof window !== "undefined" && window.addEventListener) {
+    window.addEventListener("obsSourceVisibleChanged", (e) => {
+      hidden = !(e && e.detail && e.detail.visible);
+      if (hasDom) document.documentElement.classList.toggle("obs-hidden", hidden);
+      if (hidden) return;
+      const todo = [...pending.entries()];
+      pending.clear();
+      todo.forEach(([fn, args]) => run(fn, args));
+    });
+  }
+
   // Roda fn(...args) respeitando o limite. O estado fica na propria funcao.
   function run(fn, args) {
+    if (hidden) {
+      pending.set(fn, args);
+      return undefined;
+    }
     if (!(maxFps > 0)) return fn.apply(null, args);
     const st = fn.__frameCap || (fn.__frameCap = { last: -Infinity, timer: null, args: null });
     st.args = args;
@@ -66,5 +91,5 @@
     if (msg && msg.type === "overlayCommand" && msg.name === "overlay.setMaxFps") set(msg.payload && msg.payload.value);
   }
 
-  return { run, set, handle, get: () => maxFps };
+  return { run, set, handle, get: () => maxFps, isHidden: () => hidden };
 });

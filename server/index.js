@@ -147,8 +147,12 @@ app.use("/overlay/assets", (req, res, next) => {
 app.use("/overlay/avatars", (req, res, next) => {
   express.static(avatarsPath)(req, res, next);
 });
-app.use("/overlay", express.static(path.join(__dirname, "..", "overlay")));
-app.use("/panel", express.static(path.join(__dirname, "..", "control-panel")));
+// Codigo das overlays e do painel: o navegador (OBS, janelas do app) sempre confere se o arquivo
+// mudou antes de usar a copia guardada. Sem isso, uma versao nova do HTML podia rodar com um
+// .js antigo do cache (e quebrar no meio, como aconteceu com os interruptores do painel).
+const noStale = { setHeaders: (res) => res.setHeader("Cache-Control", "no-cache") };
+app.use("/overlay", express.static(path.join(__dirname, "..", "overlay"), noStale));
+app.use("/panel", express.static(path.join(__dirname, "..", "control-panel"), noStale));
 
 const server = http.createServer(app);
 
@@ -458,10 +462,21 @@ function overlayBuildId() {
   scan(OVERLAY_DIR);
   return String(Math.round(newest));
 }
-setInterval(() => wss.broadcast({ type: "hello", buildId: overlayBuildId() }), 5000);
+// O mesmo para o painel (control-panel): ele se recarrega sozinho quando os arquivos mudam
+const PANEL_DIR = path.join(__dirname, "..", "control-panel");
+function panelBuildId() {
+  let newest = 0;
+  try {
+    fs.readdirSync(PANEL_DIR).forEach((name) => {
+      if (/\.(js|css|html)$/i.test(name)) newest = Math.max(newest, fs.statSync(path.join(PANEL_DIR, name)).mtimeMs);
+    });
+  } catch (_) {}
+  return String(Math.round(newest));
+}
+setInterval(() => wss.broadcast({ type: "hello", buildId: overlayBuildId(), panelBuildId: panelBuildId() }), 5000);
 
 wss.onConnect((socket) => {
-  if (socket.readyState === 1) socket.send(JSON.stringify({ type: "hello", buildId: overlayBuildId() }));
+  if (socket.readyState === 1) socket.send(JSON.stringify({ type: "hello", buildId: overlayBuildId(), panelBuildId: panelBuildId() }));
   const payload = rlt.getOverlayPayload();
   if (payload && socket.readyState === 1) {
     socket.send(JSON.stringify({ type: "rltConfig", data: payload }));
@@ -590,6 +605,96 @@ app.post("/api/carsets/install", async (req, res) => {
   }
 });
 
+// ---- engenheiro de pista e spotter do piloto (server/engineer.js, voz em server/speech.js) ----
+// O mesmo radio do Cubic Racing Analyser, mais o spotter. Desligado ate o piloto ligar no
+// painel; a configuracao (o que falar, voz, volume, frases reescritas) fica em settings.json.
+const speech = require("./speech").createSpeech();
+const engineer = require("./engineer").createEngineer({ config: settings.get("engineer") || {}, speak: (text, urgent) => speech.say(text, urgent) });
+speech.apply(engineer.config());
+function engineerPayload() {
+  const { PHRASES } = require("./engineer");
+  return { ok: true, config: engineer.config(), voice: speech.voice(), phrases: PHRASES.map(([key, group, label, text, vars]) => ({ key, group, label, text, vars })) };
+}
+app.get("/api/engineer", (req, res) => res.json(engineerPayload()));
+app.post("/api/engineer", (req, res) => {
+  if (!isLocalRequest(req)) return res.status(403).json({ ok: false, error: "So neste computador" });
+  const cfg = engineer.configure(req.body || {});
+  settings.set("engineer", cfg);
+  speech.apply(cfg);
+  res.json(engineerPayload());
+});
+app.get("/api/engineer/voices", async (req, res) => res.json({ ok: true, voices: await speech.listVoices(), current: speech.voice() }));
+app.post("/api/engineer/test", (req, res) => {
+  if (!isLocalRequest(req)) return res.status(403).json({ ok: false, error: "So neste computador" });
+  const key = String((req.body && req.body.key) || "volta_melhor");
+  speech.apply(engineer.config());
+  speech.say(engineer.sample(key), key.startsWith("spot_"));
+  res.json({ ok: true, text: engineer.sample(key) });
+});
+
+// ---- carsets: ligar e desligar (server/carsetLibrary.js, mesma logica do Cubic Paint Shop) ----
+// Biblioteca na pasta de dados: cada temporada baixada fica guardada e liga/desliga
+// sem baixar de novo. Ligar acrescenta as pinturas no jogo entre marcadores;
+// desligar tira exatamente isso. As pinturas do piloto nunca sao tocadas.
+const carsetLibrary = require("./carsetLibrary").createLibrary(path.join(process.env.LLG_DATA_DIR || path.join(__dirname, ".."), "carsets"));
+
+async function carsetOverrides() {
+  const gameDir = await findAms2Dir();
+  return gameDir ? carsets.overridesDir(gameDir) : null;
+}
+
+app.get("/api/carsets/library", async (req, res) => {
+  try {
+    const [overrides, gameRunning] = await Promise.all([carsetOverrides(), carsets.isGameRunning()]);
+    let seasons = [];
+    let listError = null;
+    try {
+      seasons = (await fetchCarsetList()).map((x) => x.season);
+    } catch (e) {
+      listError = e.message;
+    }
+    const lib = carsetLibrary.list(overrides);
+    const byName = new Map(lib.map((c) => [c.name, c]));
+    // temporadas da lista da liga (baixadas ou nao) e, depois, o que so existe na biblioteca
+    const items = seasons.map((season) => Object.assign({ season, downloaded: byName.has(season), active: false, cars: 0, liveries: 0 }, byName.has(season) ? byName.get(season) : {}));
+    lib.filter((c) => !seasons.includes(c.name)).forEach((c) => items.push(Object.assign({ season: c.name, downloaded: true }, c)));
+    res.json({ ok: true, gameFound: !!overrides, gameRunning, items, listError, status: carsets.status() });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+app.post("/api/carsets/toggle", async (req, res) => {
+  try {
+    const season = String((req.body && req.body.season) || "");
+    const on = !!(req.body && req.body.on);
+    if (!season) return res.status(400).json({ ok: false, error: "Falta a temporada." });
+    if (carsets.status().running) return res.status(409).json({ ok: false, error: "Ja ha um carset sendo baixado." });
+    const overrides = await carsetOverrides();
+    if (!overrides) return res.status(404).json({ ok: false, error: "Automobilista 2 nao encontrado nas bibliotecas da Steam." });
+    if (!on) {
+      carsetLibrary.deactivate(season, overrides);
+      console.log(`Carset "${season}" desligado`);
+      return res.json({ ok: true, active: false });
+    }
+    if (carsetLibrary.has(season)) {
+      const report = carsetLibrary.activate(season, overrides);
+      console.log(`Carset "${season}" ligado: ${report.applied} pinturas, ${report.skipped.length} de fora`);
+      return res.json({ ok: true, active: true, report });
+    }
+    // ainda nao baixado: baixa, guarda e liga, em segundo plano (o painel acompanha por /api/carsets/status)
+    const item = (await fetchCarsetList()).find((x) => x.season === season);
+    if (!item) return res.status(404).json({ ok: false, error: "Temporada sem carset na lista." });
+    carsets.fetchToLibrary({ link: item.link, season, library: carsetLibrary, overrides, activate: true }).then(
+      (r) => console.log(`Carset "${season}" baixado e ligado: ${r.report ? r.report.applied : 0} pinturas`),
+      (err) => console.log(`Carset "${season}": ${err.message}`)
+    );
+    res.json({ ok: true, downloading: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ---- direcao de prova no LMU (aba LMU do painel, com senha) ----
 // FCY: mensagem no chat do jogo + aviso nas tabelas (session.fcy)
 const raceControl = createRaceControl(settings, { pollChat: true }); // pollChat: segue o FCY mandado no chat por outro PC
@@ -648,6 +753,23 @@ app.post("/api/lmu/fcy", async (req, res) => {
     res.status(502).json({ ok: false, error: "Não foi possível mandar a mensagem no LMU (o jogo está aberto?): " + err.message });
   }
 });
+
+// ---- OBS: montar as overlays e mostrar/esconder cada uma (server/obsSetup.js), so deste computador ----
+const obsSetup = require("./obsSetup").createObsSetup({ httpPort: Number(HTTP_PORT) });
+function obsRoute(fn) {
+  return async (req, res) => {
+    if (!isLocalRequest(req)) return res.status(403).json({ ok: false, error: "So neste computador" });
+    try {
+      res.json(Object.assign({ ok: true }, await fn(req.body || {})));
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message, code: e.code || null });
+    }
+  };
+}
+app.get("/obs/status", obsRoute(() => obsSetup.status()));
+app.post("/obs/setup", obsRoute((b) => obsSetup.setup({ unica: !!b.unica })));
+app.post("/obs/enable-websocket", obsRoute(() => obsSetup.enableWebsocket()));
+app.post("/obs/visible", obsRoute((b) => obsSetup.setVisible(String(b.id || ""), !!b.visible)));
 
 app.post("/command", (req, res) => {
   const name = req.body && req.body.name;
@@ -947,6 +1069,11 @@ function handleGamePayload(payload) {
   raceControl.apply(payload); // FCY ligado pelo painel (so no LMU)
   raceVoice.update(payload && payload.session);
   const data = raceState.apply(payload);
+  try {
+    engineer.update(data); // engenheiro de pista e spotter do piloto (desligado por padrao)
+  } catch (err) {
+    console.error("Engenheiro:", err.message);
+  }
   noteSessionNames(data && data.standings);
   if (data && sessionLog.apply(data)) wss.broadcast(sessionLogPayload());
   if (data) trackMap.apply(data.game, data); // aprende o mapa da pista (overlay/track-map.html)
@@ -987,6 +1114,8 @@ const acClient = acDisabled
 function shutdown() {
   accClient.stop();
   acClient.stop();
+  obsSetup.close();
+  speech.stop();
 }
 if (require.main === module) {
   ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"].forEach((signal) => {
@@ -1000,6 +1129,12 @@ if (require.main === module) {
 startTcpBridge(BRIDGE_PORT, (buffer) => {
   try {
     const payload = JSON.parse(buffer.toString("utf8"));
+    // telemetria do carro do piloto entre dois pacotes completos (~30x por segundo): vai direto
+    // para a overlay de telemetria, sem passar pela tabela, mapa etc.
+    if (payload && payload.tel) {
+      wss.broadcast({ type: "tel", data: payload.tel });
+      return;
+    }
     // aviso do listener.ps1: o ACC entrou ou saiu de uma sessao
     if (payload && payload.accStatus) {
       accClient.setGameLive(!!payload.accStatus.live);
@@ -1038,6 +1173,7 @@ server.listen(HTTP_PORT, async () => {
   console.log(`Tabela de tempos em      http://localhost:${HTTP_PORT}/overlay/timing-table.html`);
   console.log(`Driver card overlay em   http://localhost:${HTTP_PORT}/overlay/driver-card.html`);
   console.log(`Tabela do piloto em      http://localhost:${HTTP_PORT}/overlay/driver-table.html`);
+  console.log(`G-force (forca G) em     http://localhost:${HTTP_PORT}/overlay/g-force.html`);
   console.log(`Estatisticas da pista em http://localhost:${HTTP_PORT}/overlay/track-stats.html`);
   console.log(`Tabela completa em      http://localhost:${HTTP_PORT}/overlay/full-timing.html`);
   console.log(`Painel de controle em    http://localhost:${HTTP_PORT}/panel/panel.html`);
@@ -1070,4 +1206,20 @@ server.listen(HTTP_PORT, async () => {
 
 if (alternate.enabled) restartAlternate();
 
-module.exports = { server, ready, shutdown, HTTP_PORT: Number(HTTP_PORT), BRIDGE_PORT: Number(BRIDGE_PORT) };
+// Dados de exemplo para o "Editar na tela" do piloto (server/demo.js): o app liga e desliga junto
+// com o modo de edicao; so tocam sem jogo mandando carros.
+const pilotDemo = require("./demo").createDemo({
+  broadcast: (msg) => wss.broadcast(msg),
+  isLive: () => Date.now() - activeGameCarsAt <= ACTIVE_GAME_TIMEOUT_MS,
+});
+function setPilotDemo(on) {
+  pilotDemo.setActive(!!on);
+}
+// o mesmo pela rede local deste computador (testes, ou o painel aberto no navegador)
+app.post("/api/pilot-demo", (req, res) => {
+  if (!isLocalRequest(req)) return res.status(403).json({ ok: false, error: "So neste computador" });
+  setPilotDemo(!!(req.body && req.body.on));
+  res.json({ ok: true, active: pilotDemo.active() });
+});
+
+module.exports = { server, ready, shutdown, setPilotDemo, HTTP_PORT: Number(HTTP_PORT), BRIDGE_PORT: Number(BRIDGE_PORT) };

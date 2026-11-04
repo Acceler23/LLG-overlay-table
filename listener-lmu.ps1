@@ -85,6 +85,7 @@ $TEL                  = 128468    # TelemInfoV01[104]
 $TEL_SIZE             = 1888
 $T_ID                 = 0         # long, slot (casa com V_ID)
 $T_LOCAL_VEL          = 184       # double[3] mLocalVel, m/s
+$T_LOCAL_ACCEL        = 208       # double[3] mLocalAccel, m/s2 (x sai pela esquerda do carro, z para tras); logo depois de mLocalVel
 $T_GEAR               = 352       # long: -1 re, 0 neutro, 1+ marchas
 $T_THROTTLE           = 388       # double, 0.0 a 1.0 (pedal do piloto, sem filtro)
 $T_BRAKE              = 396       # double, 0.0 a 1.0
@@ -163,10 +164,10 @@ function Test-GameBusy {
 # pode ser usada: ninguem estava escrevendo antes nem depois da copia.
 function Read-Snapshot {
     if (-not $script:view) {
-        $script:mmf = [System.IO.MemoryMappedFiles.MemoryMappedFile]::OpenExisting($MapName)
+        $script:mmf = [System.IO.MemoryMappedFiles.MemoryMappedFile]::OpenExisting($MapName, [System.IO.MemoryMappedFiles.MemoryMappedFileRights]::Read)
         $script:view = $script:mmf.CreateViewAccessor(0, $LAYOUT_SIZE, [System.IO.MemoryMappedFiles.MemoryMappedFileAccess]::Read)
         try {
-            $script:lockMmf = [System.IO.MemoryMappedFiles.MemoryMappedFile]::OpenExisting($LOCK_MAP_NAME)
+            $script:lockMmf = [System.IO.MemoryMappedFiles.MemoryMappedFile]::OpenExisting($LOCK_MAP_NAME, [System.IO.MemoryMappedFiles.MemoryMappedFileRights]::Read)
             $script:lockView = $script:lockMmf.CreateViewAccessor(0, 8, [System.IO.MemoryMappedFiles.MemoryMappedFileAccess]::Read)
         } catch {
             $script:lockMmf = $null; $script:lockView = $null   # sem a trava: segue sem a verificacao
@@ -322,7 +323,7 @@ while ($true) {
                     # so LMU: pneus e energia virtual (vem da telemetria do mesmo slot)
                     $carName = $vehicleName
                     $tyreFront = $null; $tyreRear = $null; $tyreWear = $null; $tyres = $null
-                    $throttle = $null; $brake = $null; $gear = $null
+                    $throttle = $null; $brake = $null; $gear = $null; $localAccel = $null
                     $virtualEnergy = $null; $fuelL = $null; $lapInvalid = ($buf[$v + $V_COUNT_LAP_FLAG] -ne 2)
                     $lastImpactEt = $null; $lastImpactMag = $null
                     if ($telemBySlot.ContainsKey($slot)) {
@@ -346,6 +347,8 @@ while ($true) {
                         $throttle = [math]::Round([math]::Max(0.0, [math]::Min(1.0, [BitConverter]::ToDouble($buf, $t + $T_THROTTLE) / $THROTTLE_FULL_AT)), 2)
                         $brake = [math]::Round([math]::Max(0.0, [math]::Min(1.0, [BitConverter]::ToDouble($buf, $t + $T_BRAKE))), 2)
                         $gear = [BitConverter]::ToInt32($buf, $t + $T_GEAR)
+                        # aceleracao real do carro (forca G da overlay/g-force.html), de qualquer carro
+                        $localAccel = @(0, 1, 2 | ForEach-Object { [math]::Round([BitConverter]::ToDouble($buf, $t + $T_LOCAL_ACCEL + ($_ * 8)), 3) })
                         $lapInvalid = ($buf[$t + $T_LAP_INVALIDATED] -ne 0)
                         # carros sem energia virtual (ex: LMP2) vem com 0 e tem combustivel
                         $ve = [BitConverter]::ToSingle($buf, $t + $T_VIRTUAL_ENERGY)
@@ -399,6 +402,7 @@ while ($true) {
                         throttle      = $throttle
                         brake         = $brake
                         gear          = $gear
+                        localAccel    = $localAccel
                     })
                 }
 
@@ -443,7 +447,8 @@ while ($true) {
                     Write-Host "Sem dados do LMU agora (jogo fechado?):" $msg
                 }
                 $cycle = 0
-                Start-Sleep -Milliseconds 400
+                # jogo fechado: procurar o processo a cada 0,4 s custava ~4% de um nucleo a toa
+                if ($msg -like "*nao esta aberto*") { Start-Sleep -Milliseconds 3000 } else { Start-Sleep -Milliseconds 400 }
             }
 
             Start-Sleep -Milliseconds $IntervalMs

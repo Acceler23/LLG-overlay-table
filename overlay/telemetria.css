@@ -1,0 +1,30 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { background: transparent; overflow: hidden; font-family: "Segoe UI", Arial, sans-serif; color: #f2f7fc; }
+
+#tm {
+  position: relative;
+  width: 460px;
+  height: 150px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(0, 20, 47, calc(0.82 * var(--llg-bg, 1)));
+  border: 1px solid rgba(53, 224, 255, calc(0.25 * var(--llg-bg, 1)));
+  transition: opacity 0.3s;
+}
+/* sem dados do carro (menu, jogo fechado): apagada */
+#tm.stale { opacity: 0.35; }
+
+canvas { display: block; width: 460px; height: 150px; }
+
+/* combustivel (opcional): no canto direito, por cima do grafico */
+.fuel { position: absolute; top: 6px; right: 8px; display: flex; flex-direction: column; align-items: flex-end; gap: 1px; padding: 3px 8px; border-radius: 6px; background: rgba(0, 20, 47, calc(0.7 * var(--llg-bg, 1))); font-variant-numeric: tabular-nums; }
+.fuel b { font-size: 13px; font-weight: 800; color: #f2f7fc; }
+.fuel span { font-size: 10px; font-weight: 600; color: #a8c0d8; }
+.fuel.low b { color: #fcbb00; }
+.fuel.crit b { color: #ff5a5a; }
+
+/* legenda (opcional): no canto, por cima do grafico */
+.legend { position: absolute; top: 6px; left: 8px; display: flex; gap: 8px; font-size: 10px; font-weight: 700; letter-spacing: 0.5px; padding: 2px 6px; border-radius: 6px; background: rgba(0, 20, 47, calc(0.6 * var(--llg-bg, 1))); }
+.legend .thr { color: #3ddc84; }
+.legend .brk { color: #ff5a5a; }
+.legend .str { color: #35e0ff; }

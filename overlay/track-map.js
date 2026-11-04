@@ -23,7 +23,13 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 function setMap(next) {
   map = next && next.points && next.points.length > 10 ? next : null;
   toScreen = null;
-  if (!map) return;
+  if (!map) {
+    // pista nova ainda sem mapa: apaga o desenho da anterior (senao ele fica na
+    // tela, com os carros de outra pista "andando" por cima quando o novo chegar)
+    ["tmOutline", "tmLine"].forEach((id) => document.getElementById(id).setAttribute("d", ""));
+    ["x1", "y1", "x2", "y2"].forEach((a) => document.getElementById("tmStart").setAttribute(a, "0"));
+    return;
+  }
   const xs = map.points.map((p) => p[0]);
   const zs = map.points.map((p) => p[1]);
   const minX = Math.min(...xs);
@@ -35,10 +41,22 @@ function setMap(next) {
   const offY = (MAP_H - (maxZ - minZ) * scale) / 2;
   // o Z do mundo cresce para o "norte": na tela ele vai para cima (senao o mapa sai espelhado)
   toScreen = (x, z) => [offX + (x - minX) * scale, offY + (maxZ - z) * scale];
-  const pts = map.points.map((p) => toScreen(p[0], p[1]).map((v) => v.toFixed(1)).join(",")).join(" ");
-  const closed = `${pts} ${toScreen(map.points[0][0], map.points[0][1]).map((v) => v.toFixed(1)).join(",")}`;
-  document.getElementById("tmOutline").setAttribute("points", closed);
-  document.getElementById("tmLine").setAttribute("points", closed);
+  // mapa pronto: a volta inteira, fechada. Aprendendo: so os trechos que os carros ja
+  // percorreram (map.runs), para nao ligar pedacos distantes da pista com uma reta
+  const xy = (i) => toScreen(map.points[i][0], map.points[i][1]).map((v) => v.toFixed(1)).join(",");
+  const n = map.points.length;
+  let d = "";
+  if (Array.isArray(map.runs)) {
+    map.runs.forEach(([from, to]) => {
+      const count = ((to - from + n) % n) + 1;
+      for (let k = 0; k < count; k++) d += (k ? "L" : "M") + xy((from + k) % n);
+    });
+  } else {
+    for (let i = 0; i < n; i++) d += (i ? "L" : "M") + xy(i);
+    d += "Z";
+  }
+  document.getElementById("tmOutline").setAttribute("d", d);
+  document.getElementById("tmLine").setAttribute("d", d);
   // linha de chegada: atravessada no comeco do tracado
   const a = toScreen(map.points[0][0], map.points[0][1]);
   const b = toScreen(map.points[1][0], map.points[1][1]);
@@ -167,7 +185,14 @@ function renderNow() {
     group.innerHTML = "";
     return;
   }
-  const cars = standings.filter((e) => e && !isDnf(e) && lapDistanceOf(e) != null).sort((a, b) => (a.isPlayer ? 1 : 0) - (b.isPlayer ? 1 : 0) || (b.position || 0) - (a.position || 0));
+  // aprendendo: carro num trecho ainda nao desenhado ficaria sobre um pedaco inventado da pista
+  const onDrawn = (e) => {
+    if (!Array.isArray(map.runs)) return true;
+    const n = map.points.length;
+    const i = Math.floor(((((lapDistanceOf(e) % map.length) + map.length) % map.length) / map.length) * n) % n;
+    return map.runs.some(([from, to]) => (from <= to ? i >= from && i <= to : i >= from || i <= to));
+  };
+  const cars = standings.filter((e) => e && !isDnf(e) && lapDistanceOf(e) != null && onDrawn(e)).sort((a, b) => (a.isPlayer ? 1 : 0) - (b.isPlayer ? 1 : 0) || (b.position || 0) - (a.position || 0));
   // lider de cada classe (o de melhor posicao na classe)
   const leaderByClass = new Map();
   cars.forEach((e) => {

@@ -342,8 +342,8 @@ function startAccClient(onPayload, options) {
       const driverIndex = r.u16();
       r.u8(); // quantidade de pilotos
       r.u8(); // marcha
-      r.f32(); // posicao X no mundo
-      r.f32(); // posicao Y no mundo
+      const worldX = r.f32(); // posicao X no mundo
+      const worldZ = r.f32(); // posicao Y no mundo (o outro eixo horizontal; aqui chamado de Z, como nos outros jogos)
       r.f32(); // direcao
       const location = r.u8(); // 1 pista, 2 pit lane, 3 entrada do box, 4 saida do box
       const kmh = r.u16();
@@ -356,7 +356,7 @@ function startAccClient(onPayload, options) {
       const best = r.lap();
       const last = r.lap();
       const current = r.lap();
-      cars.set(carIndex, { carIndex, driverIndex, location, kmh, position, spline, laps, best, last, current, at: Date.now() });
+      cars.set(carIndex, { carIndex, driverIndex, location, kmh, worldX, worldZ, position, spline, laps, best, last, current, at: Date.now() });
       trackProgress(carIndex, laps, spline);
       if (!entries.has(carIndex)) requestEntryList(); // carro novo: pede a lista de novo
     } else if (type === IN.REALTIME_UPDATE) {
@@ -491,6 +491,8 @@ function startAccClient(onPayload, options) {
         fastestLapMs: c.best.ms,
         speedKmh,
         speedMs: Math.round((speedKmh / 3.6) * 100) / 100,
+        worldX: Math.round(c.worldX * 10) / 10,
+        worldZ: Math.round(c.worldZ * 10) / 10,
         maxSpeedKmh: best,
         isPlayer: c.carIndex === session.focused, // carro em foco na camera do jogo
         pitMode,

@@ -26,6 +26,7 @@ const READY_COVERAGE = 0.9;
 const REBUILD_MS = 3000;
 const SAVE_DELAY_MS = 2000;
 const SECTOR_SAMPLES = 5; // trocas de setor para a fronteira valer
+const TELEPORT_HOLD_MS = 3000; // depois do box ou de um salto de posicao, o carro nao conta por este tempo
 
 const median = (list) => {
   const a = list.slice().sort((x, y) => x - y);
@@ -38,12 +39,36 @@ function mapKey(game, session) {
 }
 
 // Pontos do mapa a partir das passagens de cada trecho (mediana; os trechos
-// sem passagens suficientes sao preenchidos entre os vizinhos, na volta fechada)
+// sem passagens suficientes sao preenchidos entre os vizinhos, na volta fechada).
+// "runs" diz quais trechos sao de verdade (aprendidos, ou buraco curto entre
+// dois aprendidos): enquanto o mapa nao fica pronto, a overlay desenha so eles,
+// em vez de ligar pedacos distantes da pista com uma linha reta.
+const MAX_SHORT_GAP = 4; // buracos de ate tantos trechos contam como desenhados
 function buildPoints(buckets) {
   const n = buckets.length;
   const points = buckets.map((b) => (b && b.length >= MIN_SAMPLES ? [median(b.map((p) => p[0])), median(b.map((p) => p[1]))] : null));
   const filled = points.filter(Boolean).length;
-  if (!filled) return { points: [], coverage: 0 };
+  if (!filled) return { points: [], coverage: 0, runs: [] };
+  const known = points.map(Boolean);
+  for (let i = 0; i < n; i++) {
+    if (known[i]) continue;
+    // tamanho do buraco que comeca aqui
+    let len = 0;
+    while (len < n && !points[(i + len) % n]) len++;
+    if (len <= MAX_SHORT_GAP && points[(i - 1 + n) % n]) for (let k = 0; k < len; k++) known[(i + k) % n] = true;
+    i += len - 1;
+  }
+  // trechos desenhados, como [inicio, fim] (indices, fim incluso; pode dar a volta)
+  const runs = [];
+  if (known.every(Boolean)) runs.push([0, n - 1]);
+  else {
+    const start = known.findIndex((k) => !k); // comeca num buraco: nenhum trecho fica partido no 0
+    for (let s = 0; s < n; s++) {
+      const i = (start + s) % n;
+      if (known[i] && !known[(i - 1 + n) % n]) runs.push([i, i]);
+      if (known[i]) runs[runs.length - 1][1] = i;
+    }
+  }
   for (let i = 0; i < n; i++) {
     if (points[i]) continue;
     let a = i;
@@ -64,7 +89,7 @@ function buildPoints(buckets) {
     const t = (da + 1) / (da + db + 2);
     points[i] = [pa[0] + (pb[0] - pa[0]) * t, pa[1] + (pb[1] - pa[1]) * t];
   }
-  return { points: points.map((p) => (p ? [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10] : null)), coverage: filled / n };
+  return { points: points.map((p) => (p ? [Math.round(p[0] * 10) / 10, Math.round(p[1] * 10) / 10] : null)), coverage: filled / n, runs };
 }
 
 function createTrackMap(opts) {
@@ -97,6 +122,7 @@ function createTrackMap(opts) {
 
   function start(key, length) {
     const count = Math.max(50, Math.min(TARGET_BUCKETS, Math.floor(length / MIN_BUCKET_M)));
+    lastPos.clear(); // pista nova: esquece onde cada carro estava
     current = { key, length, bucketM: length / count, buckets: new Array(count).fill(null), map: null, dirty: false, builtAt: 0, sectors: null, crossings: [[], []], lastSector: new Map() };
     const known = saved[key];
     if (known && Array.isArray(known.sectors) && Math.abs(known.length - length) < 1) current.sectors = known.sectors;
@@ -129,6 +155,25 @@ function createTrackMap(opts) {
     }
   }
 
+  // Carro que acabou de ir para o box ou saltou de lugar (voltar aos pits pelo menu teleporta o
+  // carro): as leituras dele nao contam por TELEPORT_HOLD_MS, para nenhuma posicao do meio do
+  // salto (ou do caminho box -> pista) entrar no mapa.
+  const lastPos = new Map(); // carro -> { x, z, t, until }
+  function teleported(e, t) {
+    const id = e.slot != null ? `#${e.slot}` : e.name;
+    const prev = lastPos.get(id);
+    const cur = { x: e.worldX, z: e.worldZ, t, until: prev ? prev.until : 0 };
+    if ((e.pitMode || 0) !== 0) cur.until = t + TELEPORT_HOLD_MS;
+    else if (prev && t > prev.t) {
+      const dt = (t - prev.t) / 1000;
+      const moved = Math.hypot(e.worldX - prev.x, e.worldZ - prev.z);
+      const v = Math.max(Number(e.speedMs) || 0, 20);
+      if (moved > v * dt * 2 + 30) cur.until = t + TELEPORT_HOLD_MS;
+    }
+    lastPos.set(id, cur);
+    return t < cur.until;
+  }
+
   // Recebe o payload de um jogo. Os carros precisam de lapDistance, worldX e worldZ.
   function apply(game, payload) {
     const session = (payload && payload.session) || {};
@@ -140,13 +185,18 @@ function createTrackMap(opts) {
     // mapa salvo e completo: nao precisa aprender de novo
     if (current.map && current.map.saved && current.map.ready) return;
 
+    const t = clock();
     ((payload && payload.standings) || []).forEach((e) => {
       if (!e || typeof e.worldX !== "number" || typeof e.worldZ !== "number") return;
-      const d = Number(e.lapDistance);
-      if (!(d >= 0 && d < length)) return;
-      if (!(Number(e.speedMs) >= MIN_SPEED_MS)) return; // rodada, acidente, carro lento
-      if ((e.pitMode || 0) !== 0 || e.lapInvalidated) return; // box ou corte de pista
       if (e.worldX === 0 && e.worldZ === 0) return; // posicao nao informada
+      if (teleported(e, t)) return; // voltou para o box (ou trocou de carro): posicao saltou
+      const d = Number(e.lapDistance);
+      // 0 exato: o jogo ainda nao sabe a distancia (volta de saida no AMS2), mesmo com o carro no meio da pista
+      if (!(d > 0 && d < length)) return;
+      if (!(Number(e.speedMs) >= MIN_SPEED_MS)) return; // rodada, acidente, carro lento
+      if ((e.pitMode || 0) !== 0) return; // box
+      // volta invalidada conta: em treino quase toda volta de saida e invalida, e um corte de
+      // pista e uma passagem fora do lugar entre as ultimas 25 do trecho (a mediana descarta)
       const i = Math.min(current.buckets.length - 1, Math.floor(d / current.bucketM));
       const b = current.buckets[i] || (current.buckets[i] = []);
       b.push([e.worldX, e.worldZ]);
@@ -161,7 +211,7 @@ function createTrackMap(opts) {
     const built = buildPoints(current.buckets);
     if (!built.points.length) return;
     const ready = built.coverage >= READY_COVERAGE;
-    current.map = { key, length, points: built.points, coverage: Math.round(built.coverage * 1000) / 1000, ready, saved: false, sectors: current.sectors };
+    current.map = { key, length, points: built.points, coverage: Math.round(built.coverage * 1000) / 1000, ready, saved: false, sectors: current.sectors, runs: ready ? null : built.runs };
     if (ready) {
       saved[key] = { length, points: built.points, coverage: current.map.coverage, updatedAt: new Date(now).toISOString(), sectors: current.sectors };
       save();

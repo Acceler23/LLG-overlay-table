@@ -343,4 +343,36 @@ async function install(options) {
   }
 }
 
-module.exports = { listOld, deleteOld, LIST_FILE, MODES, OLD_PREFIX, parseList, downloadUrl, overridesDir, findCarDirs, applyCar, installExtracted, archiveKind, isGameRunning, install, status };
+// Baixa o carset da temporada para a biblioteca (server/carsetLibrary.js) e, com
+// activate, ja liga no jogo. Usa o mesmo trabalho em andamento (status) que install.
+// options: { link, season, library, overrides, activate }
+async function fetchToLibrary(options) {
+  if (job.running) throw new Error("Ja ha um carset sendo baixado.");
+  const url = downloadUrl(options.link);
+  if (!url) throw new Error("Link do carset invalido.");
+  job = { running: true, phase: "downloading", percent: 0, season: options.season, result: null, error: null };
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "llg-carset-"));
+  try {
+    const file = path.join(tmp, "carset.bin");
+    await download(url, file, (done, total) => {
+      job.percent = total ? Math.min(99, Math.floor((done / total) * 100)) : 0;
+    });
+    if (!archiveKind(file)) throw new Error("O arquivo baixado nao e um zip, rar ou 7z.");
+    job.phase = "extracting";
+    job.percent = 0;
+    const dir = path.join(tmp, "files");
+    await extract(file, dir);
+    job.phase = "installing";
+    const info = options.library.importDir(dir, options.season, options.overrides);
+    const report = options.activate ? options.library.activate(options.season, options.overrides) : null;
+    job = { running: false, phase: "done", percent: 100, season: options.season, result: { library: info, report }, error: null };
+    return job.result;
+  } catch (err) {
+    job = { running: false, phase: "error", percent: 0, season: options.season, result: null, error: err.message || String(err) };
+    throw err;
+  } finally {
+    fs.rm(tmp, { recursive: true, force: true }, () => {});
+  }
+}
+
+module.exports = { fetchToLibrary, listOld, deleteOld, LIST_FILE, MODES, OLD_PREFIX, parseList, downloadUrl, overridesDir, findCarDirs, applyCar, installExtracted, archiveKind, isGameRunning, install, status };

@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LLG Overlay</title>
+  <!-- Inter, como no site da liga; sem internet cai para a Segoe UI -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" />
+  <link rel="stylesheet" href="painel.css" />
+</head>
+<body>
+  <!-- Painel como o menu de um jogo. Telas com poucos botoes grandes (painel.js) e, atras da
+       engrenagem, os Ajustes com tudo o que e detalhe. Os controles dos Ajustes e da direcao de
+       prova tem os MESMOS ids do painel antigo (panel.html): a logica deles continua no panel.js. -->
+
+  <!-- primeira vez: sem chave salva, pede a chave antes de mostrar o painel -->
+  <div id="firstRun" style="display:none">
+    <div class="first-run-card">
+      <h3>Chave da liga</h3>
+      <p class="muted">Cole a chave que você recebeu do organizador. Ela é pedida só uma vez e fica guardada neste computador.</p>
+      <div class="row">
+        <input id="firstRunKey" type="password" placeholder="Cole a chave aqui" onkeydown="if (event.key === 'Enter') saveFirstRunKey()" />
+        <button id="firstRunBtn" class="btn primary" onclick="saveFirstRunKey()">Salvar</button>
+      </div>
+      <div class="muted" id="firstRunStatus"></div>
+      <div class="row">
+        <button class="btn" onclick="skipFirstRun()">Usar sem chave</button>
+        <span class="muted">Sem a chave, só os dados do jogo, sem equipes nem pontuação.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================ topo -->
+  <header class="top">
+    <button class="back" id="btnBack" onclick="voltar()" title="Voltar" hidden>◀</button>
+    <div class="brand" id="brand"><img src="logo.png" alt="Liga Let's Go" /></div>
+    <div class="title" id="screenTitle">LLG Overlay</div>
+    <div class="spacer"></div>
+    <span class="chip" id="chipGame" title="Jogo que o LLG Overlay está lendo"><i class="dot"></i><span>Sem jogo</span></span>
+    <span class="chip opt" id="chipObs" title="OBS Studio" hidden><i class="dot"></i><span>OBS</span></span>
+    <button class="gear" onclick="abrirAjustes()" title="Ajustes">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+  </header>
+
+  <main class="screens">
+    <!-- ============================================================ INICIO -->
+    <section class="screen" data-screen="inicio" data-title="LLG Overlay">
+      <div class="tiles cols-2" id="homeTiles">
+        <button class="tile huge" onclick="escolherModo('piloto')">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M12 14.5V21M9.6 11.2 3.3 9.5M14.4 11.2l6.3-1.7"/></svg>
+          <span class="t">Pilotar</span>
+          <span class="s">Tabela por cima do jogo</span>
+        </button>
+        <button class="tile huge" onclick="escolherModo('transmissao')">
+          <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="m16 10 6-3v10l-6-3"/></svg>
+          <span class="t">Transmitir</span>
+          <span class="s">Overlays no OBS</span>
+        </button>
+        <button class="tile span-2 warn" id="homeDirecao" onclick="escolherModo('direcao')" hidden>
+          <span class="t">Direção de prova</span>
+          <span class="s">FCY e Safety Car · Le Mans Ultimate</span>
+        </button>
+      </div>
+      <p class="hint" id="homeInfo" style="margin-top:20px"></p>
+    </section>
+
+    <!-- ============================================================ PILOTAR -->
+    <section class="screen" data-screen="piloto" data-title="Pilotar">
+      <div class="tiles cols-2" id="pilotTiles">
+        <!-- Overlays: tocar abre a lista dentro do proprio botao -->
+        <div class="tile big" id="tileOverlays" role="button" tabindex="0" onclick="abrirOverlays(event)">
+          <span class="t">Overlays</span>
+          <span class="state" id="overlaysEstado">—</span>
+          <div class="ovlist" id="ovList" hidden>
+            <button class="ovrow" data-ov="tabela" onclick="alternarOverlay('tabela', event)"><span><b>Tabela</b><small>Posições e pontos ao vivo</small></span><span class="toggle"><i></i></span></button>
+            <button class="ovrow" data-ov="telemetria" onclick="alternarOverlay('telemetria', event)"><span><b>Telemetria</b><small>Acelerador, freio e volante</small></span><span class="toggle"><i></i></span></button>
+            <button class="ovrow" data-ov="gforce" onclick="alternarOverlay('gforce', event)"><span><b>Força G</b><small>Lateral e acel/freio no círculo</small></span><span class="toggle"><i></i></span></button>
+          </div>
+          <span class="s" id="overlaysDica">Toque para escolher</span>
+        </div>
+        <button class="tile big" id="tileEditar" onclick="alternarEdicao()">
+          <span class="t">Editar na tela</span>
+          <span class="state sm" id="editarEstado">Travadas</span>
+          <span class="s" id="editarDica">Destrava as overlays para arrastar e mudar o tamanho no jogo</span>
+        </button>
+        <!-- Engenheiro: radio e spotter, cada um com o seu interruptor -->
+        <div class="tile big" id="tileEngenheiro">
+          <button class="tile-gear" onclick="abrirAjustes('engenheiro')" title="Ajustes do engenheiro"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></button>
+          <span class="t">Engenheiro</span>
+          <div class="ovlist">
+            <button class="ovrow" id="rowRadio" onclick="alternarEng('on')"><span><b>Rádio</b><small>Tempos, rivais e avisos</small></span><span class="toggle"><i></i></span></button>
+            <button class="ovrow" id="rowSpotter" onclick="alternarEng('spotter')"><span><b>Spotter</b><small>Esquerda, direita, livre</small></span><span class="toggle"><i></i></span></button>
+          </div>
+        </div>
+        <button class="tile big" id="tilePinturas" onclick="ir('pinturas')">
+          <span class="t">Pinturas</span>
+          <span class="state sm" id="pinturasEstado">—</span>
+          <span class="s" id="pinturasResumo">Carsets da liga</span>
+        </button>
+      </div>
+      <p class="hint center-text" id="pilotHint">O jogo precisa estar em <b>janela sem bordas</b>. Em tela cheia exclusiva as overlays não aparecem.</p>
+      <div class="tile off" id="pilotNoApp" hidden style="min-height:auto"><span class="t">Abra pelo aplicativo</span><span class="s">As overlays por cima do jogo só existem no aplicativo LLG Overlay. Aqui no navegador dá para usar o Engenheiro, as Pinturas e os Ajustes.</span></div>
+    </section>
+
+    <!-- ============================================================ PINTURAS -->
+    <section class="screen" data-screen="pinturas" data-title="Pinturas">
+      <p class="hint">Liga as pinturas da temporada no Automobilista 2. As suas pinturas não são tocadas, e desligar tira só as da liga. <b>Vale quando o jogo carregar de novo.</b></p>
+      <div class="rows" id="carsetRows"><div class="muted">Carregando…</div></div>
+      <p class="note" id="carsetNote"></p>
+    </section>
+
+    <!-- ============================================================ TRANSMITIR -->
+    <section class="screen" data-screen="transmissao" data-title="Transmitir">
+      <div class="seg" id="txSeg">
+        <button data-tx="aovivo" onclick="abaTx('aovivo')">Ao vivo</button>
+        <button data-tx="preparar" onclick="abaTx('preparar')">Preparar</button>
+      </div>
+
+      <div id="tx-aovivo">
+        <div class="section-label">Na transmissão · toque para pôr ou tirar do ar</div>
+        <div class="tiles cols-4" id="overlayTiles"></div>
+        <div class="section-label">Comandos</div>
+        <div class="tiles cols-4">
+          <button class="tile" onclick="send('overlay.nextPage')" oncontextmenu="send('overlay.prevPage');return false" title="Clique: próxima · botão direito: anterior"><span class="k">[ ]</span><span class="t">Página</span><span class="s">Geral, classes</span></button>
+          <button class="tile" onclick="send('overlay.nextColumn')" oncontextmenu="send('overlay.prevColumn');return false" title="Clique: próxima · botão direito: anterior"><span class="k">, .</span><span class="t">Coluna</span><span class="s">Intervalo, gap, voltas</span></button>
+          <button class="tile" onclick="send('overlay.toggleBattles')"><span class="k">9</span><span class="t">Disputas</span><span class="s">Carros colados</span></button>
+          <button class="tile" onclick="send('overlay.toggleStandings')"><span class="k">0</span><span class="t">Pontos</span><span class="s">Campeonato</span></button>
+        </div>
+        <div class="tiles cols-3" style="margin-top:14px">
+          <button class="tile small" onclick="send('overlay.toggleHighlight')"><span class="k">P</span><span class="t">Destaque</span></button>
+          <button class="tile small" onclick="send('overlay.toggleGForce')"><span class="k">8</span><span class="t">G-force</span></button>
+          <button class="tile small warn" onclick="if (confirm('Zerar as posições de largada, paradas e stint?')) send('race.reset')"><span class="t">Zerar largada</span><span class="s">use no grid</span></button>
+        </div>
+      </div>
+
+      <div id="tx-preparar" hidden>
+        <div class="rows" id="prepRows"></div>
+      </div>
+    </section>
+
+    <!-- ============================================================ DIRECAO DE PROVA -->
+    <section class="screen" data-screen="direcao" data-title="Direção de prova">
+      <div id="lmuLocked" class="card">
+        <h3>Senha da direção de prova</h3>
+        <div class="muted" id="lmuLockHint">Digite a senha.</div>
+        <div class="row">
+          <input id="lmuPass" type="password" placeholder="Senha" onkeydown="if (event.key === 'Enter') lmuUnlock()" />
+          <button id="lmuUnlockBtn" class="btn primary" onclick="lmuUnlock()">Entrar</button>
+        </div>
+        <div class="muted" id="lmuLockStatus"></div>
+      </div>
+      <div id="lmuUnlocked" hidden>
+        <button id="fcyBtn" onclick="lmuToggleFcy()">FCY</button>
+        <button id="scBtn" onclick="lmuToggleSc()">SAFETY CAR</button>
+        <button id="waveBtn" onclick="lmuWaveBy()" disabled>RETARDATÁRIOS PODEM ULTRAPASSAR</button>
+        <div class="muted" id="waveStatus"></div>
+        <div class="muted" id="fcyStatus"></div>
+        <div class="card" style="margin-top:18px">
+          <div class="row"><span class="lbl">Carro do Safety Car</span><select id="lmuScCar" onchange="lmuSetScCar()"></select></div>
+          <div class="muted" id="lmuScCarHint"></div>
+        </div>
+        <div class="card">
+          <h3>Infrações · quem queimou o FCY</h3>
+          <p class="lead">Acima de 62 km/h depois da contagem. Em amarelo: acima do limite agora.</p>
+          <table id="fcyBreaches">
+            <thead><tr><th>FCY</th><th>Piloto</th><th class="n">Acima por</th><th class="n">Após a contagem</th><th class="n">Máx.</th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div class="muted" id="fcyNoBreach">Ninguém queimou o FCY nesta sessão.</div>
+        </div>
+        <div class="row wrap">
+          <button class="btn" onclick="lmuOpenDirecao()">Tela completa da direção</button>
+          <button class="btn" onclick="abrirAjustes('direcao')">Mensagens e tempos</button>
+          <button class="btn danger" onclick="lmuLock()">Sair da direção</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============================================================ AJUSTES -->
+    <section class="screen" data-screen="ajustes" data-title="Ajustes">
+      <div class="settings">
+        <nav class="cats">
+          <button class="cat" data-cat="piloto" data-modos="piloto" onclick="categoria('piloto')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M12 14.5V21M9.6 11.2 3.3 9.5M14.4 11.2l6.3-1.7"/></svg>Piloto</button>
+          <button class="cat" data-cat="engenheiro" data-modos="piloto" onclick="categoria('engenheiro')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1v-6h3zM3 19a2 2 0 0 0 2 2h1v-6H3z"/></svg>Engenheiro</button>
+          <button class="cat" data-cat="transmissao" data-modos="transmissao" onclick="categoria('transmissao')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="m16 10 6-3v10l-6-3"/></svg>Transmissão</button>
+          <button class="cat" data-cat="liga" data-modos="piloto,transmissao" onclick="categoria('liga')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18.5 20a6.5 6.5 0 0 0-2.5-5.1"/></svg>Liga<span id="linksBadge" class="badge" hidden></span></button>
+          <button class="cat" data-cat="direcao" data-modos="direcao" onclick="categoria('direcao')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V4M4 4h12l-2 4 2 4H4"/></svg>Direção</button>
+          <button class="cat" data-cat="sistema" data-modos="piloto,transmissao,direcao" onclick="categoria('sistema')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>Sistema</button>
+        </nav>
+
+        <div>
+          <!-- ---------------------------------------- Ajustes · Piloto -->
+          <div class="pane" data-cat="piloto">
+
+            <div class="card" id="aj-overlays">
+              <h3>Overlays no jogo</h3>
+              <div class="row"><span class="lbl">Tabela: fundo</span><input type="range" min="0" max="100" step="5" value="100" data-opacidade="tabela" /><span class="val" id="opTabelaVal">100%</span></div>
+              <div class="row"><span class="lbl">Telemetria: fundo</span><input type="range" min="0" max="100" step="5" value="100" data-opacidade="telemetria" /><span class="val" id="opTelemetriaVal">100%</span></div>
+              <div class="row"><span class="lbl">Força G: fundo</span><input type="range" min="0" max="100" step="5" value="100" data-opacidade="gforce" /><span class="val" id="opGforceVal">100%</span></div>
+              <label class="check row"><input type="checkbox" id="telLegend" onchange="opcaoTelemetria()" /> Telemetria: mostrar a legenda</label>
+              <label class="check row"><input type="checkbox" id="telSteering" onchange="opcaoTelemetria()" /> Telemetria: mostrar o volante</label>
+              <label class="check row"><input type="checkbox" id="telFuel" onchange="opcaoTelemetria()" /> Telemetria: mostrar o combustível (consumo por volta)</label>
+              <p class="lead">Para mover e mudar o tamanho, use "Editar na tela" na tela Pilotar. Aqui dá para voltar cada uma ao lugar inicial.</p>
+              <div class="row wrap">
+                <button class="btn" onclick="resetOverlay('tabela')">Tabela: posição e tamanho padrão</button>
+                <button class="btn" onclick="resetOverlay('telemetria')">Telemetria: posição e tamanho padrão</button>
+                <button class="btn" onclick="resetOverlay('gforce')">Força G: posição e tamanho padrão</button>
+              </div>
+              <p class="lead" style="margin-top:16px">Em outro monitor, no celular ou no OBS:</p>
+              <div class="row"><span class="lbl">Tabela</span><input id="linkDriver" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkDriver')">Copiar</button></div>
+              <div class="row"><span class="lbl">Telemetria</span><input id="linkTelemetria" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkTelemetria')">Copiar</button></div>
+            </div>
+
+            <div class="card" id="aj-old">
+              <h3>Pinturas antigas (_old_)</h3>
+              <p class="lead">Versões antigas do LLG Overlay guardavam as pinturas trocadas com "_old_" no nome. Aqui dá para apagá-las e liberar espaço. Não pode ser desfeito.</p>
+              <div class="row wrap">
+                <button class="btn" onclick="checkOldLiveries()">Verificar</button>
+                <button id="oldDeleteBtn" class="btn danger" onclick="deleteOldLiveries()" disabled>Apagar pinturas antigas</button>
+              </div>
+              <div class="muted" id="oldStatus"></div>
+            </div>
+
+            <!-- controles do painel antigo que o panel.js ainda preenche: ficam escondidos -->
+            <div hidden>
+              <div id="appSection">
+                <input id="drvVisible" type="checkbox" /><button id="drvEdit"></button>
+                <input id="drvScale" type="range" min="50" max="200" value="100" /><span id="drvScaleVal"></span><div id="drvHint"></div>
+              </div>
+              <select id="carsetSeason"></select>
+              <input type="radio" name="carsetMode" value="clean" checked /><input type="radio" name="carsetMode" value="keep" /><input type="radio" name="carsetMode" value="sameName" />
+              <button id="carsetInstall"></button>
+              <div id="carsetGame"></div><div id="carsetStatus"></div><div id="carsetResult"></div>
+            </div>
+          </div>
+
+          <!-- ---------------------------------------- Ajustes · Engenheiro (so do piloto) -->
+          <div class="pane" data-cat="engenheiro">
+            <div class="card" id="aj-eng">
+              <h3>Engenheiro e spotter</h3>
+              <p class="lead">O mesmo rádio do Cubic Racing Analyser, com voz do Windows, mais o spotter. Fala do carro em foco no jogo (o seu, quando você pilota).</p>
+              <label class="check row"><input type="checkbox" data-eng="on" /> Rádio do engenheiro ligado</label>
+              <label class="check row"><input type="checkbox" data-eng="spotter" /> Spotter ligado: carro à esquerda, à direita, livre (funciona sem o rádio)</label>
+              <label class="check row"><input type="checkbox" data-eng="laps" /> Tempo de cada volta</label>
+              <label class="check row"><input type="checkbox" data-eng="rivals" /> Posições e rivais ao fechar a volta</label>
+              <label class="check row"><input type="checkbox" data-eng="alerts" /> Bandeiras, batida, danos e carro parado à frente</label>
+              <label class="check row"><input type="checkbox" data-eng="result" /> Resultado no fim da corrida</label>
+              <div class="row"><span class="lbl">Volume</span><input type="range" min="0" max="100" step="5" data-eng="volume" /><span class="val" id="engVolVal"></span></div>
+              <div class="row"><span class="lbl">Velocidade da fala</span><input type="range" min="-5" max="5" step="1" data-eng="rate" /><span class="val" id="engRateVal"></span></div>
+              <div class="row"><span class="lbl">Voz</span><select data-eng="voice" id="engVoice"><option value="">Padrão (Bia · voz feminina)</option></select></div>
+              <div class="row wrap">
+                <button class="btn primary" onclick="testarFrase('volta_melhor')">Testar a voz</button>
+                <button class="btn" onclick="testarFrase('spot_esquerda')">Testar o spotter</button>
+              </div>
+              <div class="muted" id="engStatus"></div>
+            </div>
+
+            <div class="card" id="aj-frases">
+              <h3>Frases</h3>
+              <p class="lead">Reescreva o que o engenheiro fala. As palavras entre chaves, como {tempo}, são trocadas pelos valores. Em branco: a frase padrão.</p>
+              <div id="engPhrases"></div>
+            </div>
+
+          </div>
+
+          <!-- ---------------------------------------- Ajustes · Transmissao -->
+          <div class="pane" data-cat="transmissao">
+            <div class="jump">
+              <button onclick="pular('aj-obs')">OBS</button>
+              <button onclick="pular('aj-tabela')">Tabela</button>
+              <button onclick="pular('aj-visual')">Visual</button>
+              <button onclick="pular('aj-fotos')">Fotos e logos</button>
+              <button onclick="pular('aj-pista')">Pista</button>
+              <button onclick="pular('aj-jogos')">LMU e ACC</button>
+              <button onclick="pular('aj-links')">Links</button>
+            </div>
+
+            <div class="card" id="aj-obs">
+              <h3>OBS</h3>
+              <p class="lead" id="obsAjHelp">Monta as quatro overlays na cena atual do OBS, no tamanho e no lugar certos, acima do jogo. Rodar de novo só corrige o que mudou.</p>
+              <div class="row wrap">
+                <button class="btn primary" onclick="obsMontar()">Montar no OBS</button>
+                <a href="/panel/previa.html" target="_blank"><button class="btn" type="button">Ver prévia da transmissão</button></a>
+              </div>
+              <div class="muted" id="obsAjStatus"></div>
+            </div>
+
+            <div class="card" id="aj-tabela">
+              <h3>Tabela de tempos</h3>
+              <div class="row"><span class="lbl">Bateria da corrida</span>
+                <select id="heatRace" onchange="setHeat()">
+                  <option value="">Automático (pelo RLT)</option><option value="0">Só "CORRIDA", sem número</option>
+                  <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+                </select>
+              </div>
+              <div class="row"><span class="lbl">Bateria da quali</span>
+                <select id="heatQuali" onchange="setHeat()">
+                  <option value="">Automático (pelo RLT)</option><option value="0">Só "QUALI", sem número</option>
+                  <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option>
+                </select>
+              </div>
+              <div class="row"><span class="lbl">Disputas mostram</span>
+                <select id="battleScope" onchange="setBattleScope(this.value)">
+                  <option value="all">Tabela toda, intervalo menor que 0,6 s</option>
+                  <option value="focus">Só o piloto assistido, menor que 1 s</option>
+                </select>
+              </div>
+              <label class="check row"><input id="altEnabled" type="checkbox" onchange="setAlternate()" /> Alternar as colunas sozinho</label>
+              <div class="row"><span class="lbl">Tempo em cada coluna</span><input id="altSeconds" type="range" min="5" max="120" step="5" value="20" oninput="showAlternateSeconds(this.value)" onchange="setAlternate()" /><span id="altSecondsVal" class="val">20 s</span></div>
+            </div>
+
+            <div class="card" id="aj-visual">
+              <h3>Visual</h3>
+              <div class="row"><span class="lbl">Fundo da tabela</span><input id="opTable" type="range" min="0" max="100" value="100" oninput="setOpacity('table', this.value)" /><span id="opTableVal" class="val">100%</span></div>
+              <div class="row"><span class="lbl">Linhas da tabela</span><input id="opRows" type="range" min="0" max="100" value="100" oninput="setOpacity('rows', this.value)" /><span id="opRowsVal" class="val">100%</span></div>
+              <div class="row"><span class="lbl">Mapa</span><input id="opMap" type="range" min="0" max="100" value="100" oninput="setOpacity('map', this.value)" /><span id="opMapVal" class="val">100%</span></div>
+              <div class="row"><span class="lbl">Cor da equipe</span><input id="teamTint" type="range" min="0" max="100" value="50" oninput="setTeamTint(this.value)" /><span id="teamTintVal" class="val">50%</span></div>
+              <label class="check row"><input id="maxFps30" type="checkbox" onchange="setMaxFps(this.checked)" /> Limitar a 30 FPS, sem animações (PC fraco)</label>
+            </div>
+
+            <div class="card" id="aj-fotos">
+              <h3>Fotos e logos</h3>
+              <p class="lead">Fotos do driver card: <b>nome no RLT__nome no jogo.png</b>, ou só um dos dois. Vazio = pasta padrão.</p>
+              <div class="row"><input id="avatarsPath" type="text" placeholder="C:\...\Fotos dos pilotos" /><button class="btn" onclick="saveAvatarsPath()">Salvar</button><button class="btn" onclick="saveAvatarsPath(true)">Padrão</button><button class="btn" onclick="openAvatarsFolder()">Abrir</button></div>
+              <div class="muted" id="avatarsStatus"></div>
+              <p class="lead" style="margin-top:16px">Logos: repositório com as pastas teams/ e cars/.</p>
+              <div class="row"><input id="assetsBaseUrl" type="text" placeholder="https://github.com/user/repo" /><button class="btn" onclick="saveAssetsBase()">Salvar</button><button class="btn" onclick="resetAssetsBase()">Só local</button></div>
+              <div class="muted" id="assetsBaseStatus"></div>
+              <p class="lead" style="margin-top:16px">Logo de uma equipe</p>
+              <div id="teamLogos"></div>
+            </div>
+
+            <div class="card" id="aj-pista">
+              <h3>Pista</h3>
+              <div class="row wrap"><button class="btn" onclick="forgetTrackMap()">Aprender o mapa desta pista de novo</button><span class="muted" id="mapStatus"></span></div>
+              <p class="lead" style="margin-top:16px">Estatísticas da pista (overlay 420×300, de um multiseason do RLT)</p>
+              <div class="row"><input id="linkTrackStats" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkTrackStats')">Copiar</button></div>
+              <div class="row"><span class="lbl">Multiseason</span><select id="tsKey" onchange="setTrackStats({ key: this.value })"></select></div>
+              <div class="row"><span class="lbl">Dado</span>
+                <select id="tsStat" onchange="setTrackStats({ stat: this.value })">
+                  <option value="winners">Últimos vencedores</option><option value="poles">Últimas poles</option><option value="records">Recordes da pista</option>
+                </select>
+              </div>
+              <div class="row"><span class="lbl">Pista</span><select id="tsTrack" onchange="setTrackStats({ trackId: this.value })"></select></div>
+              <div class="muted" id="tsStatus"></div>
+            </div>
+
+            <div class="card" id="aj-jogos">
+              <h3>Le Mans Ultimate</h3>
+              <label class="check row"><input id="lmuFollow" type="checkbox" onchange="lmuSaveFollow()" /> Seguir o FCY e o Safety Car mandados no chat</label>
+              <div class="muted" id="lmuFcyNow"></div>
+              <label class="check row"><input id="voiceOn" type="checkbox" onchange="saveVoice()" /> Tocar a contagem e os avisos (pode ir para a live)</label>
+              <div class="row"><span class="lbl">Volume</span><input id="voiceVolume" type="range" min="0" max="100" step="5" onchange="saveVoice()" /><button class="btn" onclick="testVoice()">Testar</button></div>
+              <div class="muted" id="voiceStatus"></div>
+              <h3 style="margin-top:22px">Assetto Corsa Competizione</h3>
+              <label class="check row"><input id="accStintOn" type="checkbox" onchange="setAccStint()" /> A corrida tem tempo máximo de stint</label>
+              <div class="row"><span class="lbl">Limite (minutos)</span><input id="accStintMin" type="number" min="1" max="600" step="1" value="35" onchange="setAccStint()" /></div>
+              <div class="muted" id="accStintStatus"></div>
+            </div>
+
+            <div class="card" id="aj-links">
+              <h3>Links das overlays</h3>
+              <p class="lead">Para montar o OBS à mão ou abrir noutro PC. Tamanhos: tabela 880×1080, card 560×210, mapa 420×400, G-force 300×420.</p>
+              <div class="row"><span class="lbl">Tabela</span><input id="linkTable" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkTable')">Copiar</button></div>
+              <div class="row"><span class="lbl">Driver card</span><input id="linkCard" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkCard')">Copiar</button></div>
+              <div class="row"><span class="lbl">Mapa</span><input id="linkMap" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkMap')">Copiar</button></div>
+              <div class="row"><span class="lbl">Tabela completa</span><input id="linkFull" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkFull')">Copiar</button></div>
+              <label class="check row"><input id="fullCenter" type="checkbox" onchange="setFullCenter(this.checked)" /> Tabela completa: manter o piloto em foco no meio</label>
+              <div class="row wrap">
+                <button class="btn" onclick="send('overlay.fullScroll', { dir: -1 })">▲ Subir</button>
+                <button class="btn" onclick="send('overlay.fullScroll', { dir: 1 })">▼ Descer</button>
+                <button class="btn" onclick="send('overlay.fullScroll', { dir: 0 })">Voltar</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ---------------------------------------- Ajustes · Liga -->
+          <div class="pane" data-cat="liga">
+            <div class="card">
+              <h3>Temporada</h3>
+              <p class="lead">Nomes, equipes, classes e pontuação do Racing League Tools. Fica lembrada.</p>
+              <div class="row">
+                <select id="rltSeason"><option value="">Sem temporada (só dados do jogo)</option></select>
+                <button class="btn primary" onclick="applySeason()">Aplicar</button>
+                <button class="btn" onclick="reloadSeasons()" title="Busca a lista de novo">↻</button>
+              </div>
+              <div id="rltClasses"></div>
+            </div>
+            <div class="card" data-modos="transmissao">
+              <h3>Pilotos sem ligação</h3>
+              <p class="lead">Nomes da pista que o RLT não reconheceu. Escolha o piloto do lineup; fica salvo para a temporada.</p>
+              <div id="linksUnmatched"></div>
+            </div>
+            <div class="card" data-modos="transmissao">
+              <h3>Ligados à mão ou ignorados</h3>
+              <div id="linksManual"></div>
+            </div>
+            <div class="card">
+              <h3>Chave da liga</h3>
+              <div class="row">
+                <input id="rltKey" type="password" placeholder="Cole a chave" />
+                <button class="btn primary" onclick="saveKey()">Salvar</button>
+                <button class="btn danger" onclick="clearRlt()">Limpar</button>
+              </div>
+              <div class="muted" id="rltStatus"></div>
+            </div>
+          </div>
+
+          <!-- ---------------------------------------- Ajustes · Direcao -->
+          <div class="pane" data-cat="direcao">
+            <div class="card">
+              <h3>Mensagens no chat do LMU</h3>
+              <p class="lead">{s} vira os segundos; {nome}, o nome do piloto. Precisa estar com a direção de prova desbloqueada.</p>
+              <div class="row"><span class="lbl">FCY</span><input id="lmuMsgOn" maxlength="200" onchange="lmuSaveMessages()" /></div>
+              <div class="row"><span class="lbl">Contagem FCY</span><input id="lmuMsgFcyTick" maxlength="200" onchange="lmuSaveMessages()" /></div>
+              <div class="row"><span class="lbl">Fim da contagem</span><input id="lmuMsgGo" maxlength="200" onchange="lmuSaveMessages()" /></div>
+              <div class="row"><span class="lbl">Verde em</span><input id="lmuMsgEnding" maxlength="200" onchange="lmuSaveMessages()" /></div>
+              <div class="row"><span class="lbl">Contagem verde</span><input id="lmuMsgGreenTick" maxlength="200" onchange="lmuSaveMessages()" /></div>
+              <div class="row"><span class="lbl">Fim do FCY</span><input id="lmuMsgOff" maxlength="200" onchange="lmuSaveMessages()" /></div>
+              <div class="row"><span class="lbl">Safety Car</span><input id="lmuMsgScOn" maxlength="200" onchange="lmuSaveMessages()" /></div>
+              <div class="row"><span class="lbl">Depois do SC</span><input id="lmuMsgScCatch" maxlength="200" onchange="lmuSaveMessages()" /></div>
+              <div class="row"><span class="lbl">Fim do SC</span><input id="lmuMsgScOff" maxlength="200" onchange="lmuSaveMessages()" /></div>
+              <div class="row"><span class="lbl">Retardatários</span><input id="lmuMsgScWave" maxlength="200" onchange="lmuSaveMessages()" /></div>
+              <div class="row"><span class="lbl">Cada piloto</span><input id="lmuMsgScWaveDriver" maxlength="200" onchange="lmuSaveMessages()" /></div>
+            </div>
+            <div class="card">
+              <h3>Tempos</h3>
+              <div class="row"><span class="lbl">Contagem do FCY (s)</span><input id="lmuCountdown" type="number" min="0" max="60" step="1" onchange="lmuSaveMessages()" /></div>
+              <div class="row"><span class="lbl">Contagem da verde (s)</span><input id="lmuGreen" type="number" min="0" max="60" step="1" onchange="lmuSaveMessages()" /></div>
+              <div class="row"><span class="lbl">Atraso do chat (s)</span><input id="lmuChatLag" type="number" min="0" max="5" step="0.1" onchange="lmuSaveMessages()" /></div>
+              <label class="check row"><input id="lmuChatCountdown" type="checkbox" onchange="lmuSaveMessages()" /> Mandar a contagem no chat (uma mensagem por segundo)</label>
+            </div>
+          </div>
+
+          <!-- ---------------------------------------- Ajustes · Sistema -->
+          <div class="pane" data-cat="sistema">
+            <div class="card">
+              <h3>LLG Overlay</h3>
+              <div class="row wrap"><span id="appVersion" style="font-weight:800">Versão —</span></div>
+              <div id="appFiles" hidden>
+                <div class="row wrap">
+                  <button id="updateBtn" class="btn" onclick="checkUpdate()">Procurar atualização</button>
+                  <button class="btn" onclick="llgApp.openPath('config')">Pasta de configuração</button>
+                  <button class="btn" onclick="llgApp.openPath('data')">Pasta de dados e registros</button>
+                </div>
+                <div class="muted" id="updateStatus"></div>
+                <p class="lead" style="margin-top:16px">Abrir junto com o aplicativo (como o OBS)</p>
+                <div id="companionList"></div>
+                <div class="row wrap">
+                  <button class="btn" onclick="companionAction('add')">Adicionar programa…</button>
+                  <button id="companionLaunchAll" class="btn" onclick="companionAction('launchAll')">Abrir todos agora</button>
+                </div>
+                <div class="muted" id="companionStatus"></div>
+              </div>
+            </div>
+            <div class="card">
+              <h3>Rede local</h3>
+              <p class="lead">Outros aparelhos da mesma rede veem as overlays. O painel continua só neste computador.</p>
+              <label class="check row"><input id="lanOverlays" type="checkbox" onchange="setLan(this.checked)" /> Liberar as overlays para a rede local</label>
+              <div id="lanLinks"></div>
+              <div class="muted" id="lanStatus"></div>
+            </div>
+            <div class="card">
+              <h3>Assetto Corsa (o primeiro)</h3>
+              <p class="lead">Só o AC 1 precisa: instala e ativa um app pequeno, sem janela, na pasta do jogo.</p>
+              <div class="row"><button id="acInstallBtn" class="btn" onclick="installAcApp()">Instalar no Assetto Corsa</button></div>
+              <div class="muted" id="acInstallStatus"></div>
+            </div>
+            <div class="card">
+              <h3>Registro</h3>
+              <div id="rltLog"></div>
+            </div>
+            <p class="note"><a href="/panel/panel.html">Abrir o painel antigo</a></p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="panel.js"></script>
+  <script src="painel.js"></script>
+</body>
+</html>

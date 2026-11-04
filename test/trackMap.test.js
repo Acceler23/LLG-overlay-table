@@ -82,3 +82,39 @@ test("setores: aprende onde cada setor comeca pela troca de setor dos carros", (
   const map = tm.get();
   assert.deepEqual(map.sectors, [1502, 3202]);
 });
+
+test("aprendendo: so os trechos percorridos sao desenhados, sem reta ligando buracos", () => {
+  const P = [[1, 1], [1, 1], [1, 1]];
+  const b = new Array(20).fill(null);
+  [0, 1, 2, 3, 6, 7, 15, 16, 17, 19].forEach((i) => (b[i] = P));
+  // buracos de 2 (4-5) e de 1 (18) entram; o de 7 (8-14) fica de fora; o trecho da a volta no 0
+  assert.deepEqual(buildPoints(b).runs, [[15, 7]]);
+  assert.deepEqual(buildPoints(new Array(20).fill(P)).runs, [[0, 19]]);
+});
+
+test("volta invalidada conta (treino), distancia 0 nao conta", () => {
+  const { map, drive } = setup(null);
+  // B: volta invalida mas no tracado (conta); C: distancia 0 no meio da pista (nao conta)
+  drive(4, (d) => (d % 10 ? { name: "B", lapDistance: d, worldX: onCircle(d)[0], worldZ: onCircle(d)[1], speedMs: 50, pitMode: 0, lapInvalidated: true } : { name: "C", lapDistance: 0, worldX: 9999, worldZ: 9999, speedMs: 50, pitMode: 0 }));
+  const m = map.get();
+  assert.ok(m && m.ready);
+  assert.ok(Math.hypot(m.points[0][0] - onCircle(0)[0], m.points[0][1] - onCircle(0)[1]) < 6, "largada no lugar");
+});
+
+test("voltar para o box (teleporte) nao deixa a posicao do salto no mapa", () => {
+  const { map, drive } = setup(null);
+  let jumped = false;
+  // D anda no tracado ate a metade e e teleportado para longe, ainda com pitMode 0 por uma leitura
+  drive(4, (d) => {
+    if (d < 500) return { name: "D", lapDistance: d, worldX: onCircle(d)[0], worldZ: onCircle(d)[1], speedMs: 50, pitMode: 0 };
+    if (!jumped) {
+      jumped = true;
+      return { name: "D", lapDistance: d, worldX: 5000, worldZ: 5000, speedMs: 50, pitMode: 0 };
+    }
+    return { name: "D", lapDistance: d, worldX: 5000, worldZ: 5000, speedMs: 0, pitMode: 4 };
+  });
+  const m = map.get();
+  // o salto (5000, 5000) daria milhares de metros; ate ~8 m e so o tamanho do trecho
+  const worst = Math.max(...m.points.map((p, i) => Math.hypot(p[0] - onCircle(i * (1000 / m.points.length))[0], p[1] - onCircle(i * (1000 / m.points.length))[1])));
+  assert.ok(worst < 10, `erro maximo ${worst.toFixed(1)} m`);
+});

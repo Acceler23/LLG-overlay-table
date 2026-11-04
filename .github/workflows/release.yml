@@ -73,6 +73,11 @@ jobs:
       - name: Montar o aplicativo
         run: npm run build
 
+      # O Inno Setup 6 ja vem instalado no windows-latest. Precisa rodar antes
+      # do "Compactar", que renomeia a pasta dist/LLG Overlay-win32-x64.
+      - name: Gerar o instalador
+        run: node installer/gerar.mjs --sem-build
+
       - name: Compactar
         shell: pwsh
         run: |
@@ -87,12 +92,17 @@ jobs:
         run: |
           $notes = @"
           **Como instalar**
-          1. Baixe o arquivo ``LLG-Overlay-$env:VERSION-win64.zip`` abaixo e descompacte em qualquer pasta.
-          2. Abra o ``LLG Overlay.exe``. Na primeira vez o Windows pode avisar que o aplicativo é desconhecido: clique em "Mais informações" e "Executar assim mesmo".
-          3. Cole a chave de acesso que você recebeu do organizador da liga.
+          1. Baixe o ``LLG-Overlay-Setup-$env:VERSION.exe`` abaixo e dê dois cliques nele. Não precisa de senha de administrador.
+          2. Na primeira vez o Windows pode avisar que o aplicativo é desconhecido: clique em "Mais informações" e "Executar assim mesmo".
+          3. Clique em Avançar até o fim. O atalho "LLG Overlay" fica na área de trabalho.
+          4. Abra o programa e cole a chave de acesso que você recebeu do organizador da liga.
+
+          Para desinstalar: Configurações > Aplicativos > Aplicativos instalados > LLG Overlay > Desinstalar (ou "Desinstalar o LLG Overlay" no menu Iniciar).
+
+          Prefere sem instalar? Baixe o ``LLG-Overlay-$env:VERSION-win64.zip``, descompacte em qualquer pasta e abra o ``LLG Overlay.exe``.
 
           **Como atualizar**
           A partir desta versão, o aplicativo avisa sozinho quando sai uma versão nova: clique em "Atualizar agora" e ele fecha, instala e abre de novo. As configurações ficam guardadas fora da pasta do aplicativo e são mantidas.
           Vindo de uma versão sem o aviso (0.1.1 ou anterior): descompacte esta por cima da pasta antiga, uma vez só.
           "@
-          gh release create $env:VERSION "LLG-Overlay-$env:VERSION-win64.zip" --title "LLG Overlay $env:VERSION" --notes $notes --generate-notes --target $env:GITHUB_SHA
+          gh release create $env:VERSION "dist/LLG-Overlay-Setup-$env:VERSION.exe" "LLG-Overlay-$env:VERSION-win64.zip" --title "LLG Overlay $env:VERSION" --notes $notes --generate-notes --target $env:GITHUB_SHA

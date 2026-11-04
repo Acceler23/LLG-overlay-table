@@ -520,6 +520,40 @@ function checkBuildId(id) {
   else if (id !== overlayBuildId) location.reload();
 }
 
+// "Editar na tela" do app: a janela ganha a barrinha de edicao (llgEditBar). Em edicao, sem o jogo
+// em sessao, a tabela mostra os dados de exemplo; ao travar, o exemplo some.
+const editing = () => !!document.getElementById("llgEditBar");
+let showingDemo = false;
+let demoLoop = null;
+setInterval(() => {
+  if (showingDemo && !editing()) {
+    showingDemo = false;
+    demoLoop = null;
+    demoSeeded = false;
+    handleStandings({ standings: [], session: null });
+  }
+}, 500);
+
+// historico do exemplo (server/demo.js): a distancia de cada carro, 5x por segundo, dos 60 s antes
+// do trecho ate este quadro (a ultima linha e agora). Entra nos intervalos com horarios "para tras".
+let demoSeeded = false;
+function seedDemoHistory(data) {
+  const h = data && data.hist;
+  if (!h || !Array.isArray(h.d) || !Array.isArray(h.names) || !(h.hz > 0)) return false;
+  gapTracker.reset();
+  gapSmoother.reset();
+  const now = Number(data.ts) || Date.now();
+  const n = h.d.length;
+  h.d.forEach((row, k) => {
+    const cars = [];
+    h.names.forEach((name, i) => {
+      if (typeof row[i] === "number") cars.push({ name, totalDistance: row[i] });
+    });
+    gapTracker.update(cars, now - ((n - 1 - k) * 1000) / h.hz);
+  });
+  return true;
+}
+
 function connect() {
   const socket = new WebSocket(WS_URL);
   socket.addEventListener("message", (ev) => {
@@ -531,7 +565,24 @@ function connect() {
     }
     LLGFrameCap.handle(msg); // limite de FPS do painel
     if (msg.type === "standings") {
+      // jogo real com carros: ele manda, mesmo em edicao
+      if (msg.data && Array.isArray(msg.data.standings) && msg.data.standings.length) showingDemo = false;
+      if (!showingDemo) handleStandings(msg.data);
+    } else if (msg.type === "demo" && editing()) {
+      // dados de exemplo do "Editar na tela" (server/demo.js): so na janela do piloto em edicao
+      if (msg.data.demoLoop !== demoLoop) {
+        demoLoop = msg.data.demoLoop;
+        demoSeeded = false;
+        gapTracker.reset(); // o loop recomeca: o tempo "volta para tras"
+        gapSmoother.reset();
+      }
+      showingDemo = true;
       handleStandings(msg.data);
+      // depois da lista: a primeira dela e uma "sessao nova", que zera os intervalos
+      if (!demoSeeded && seedDemoHistory(msg.data)) {
+        demoSeeded = true;
+        render();
+      }
     } else if (msg.type === "hello") {
       checkBuildId(msg.buildId);
     } else if (msg.type === "rltConfig") {

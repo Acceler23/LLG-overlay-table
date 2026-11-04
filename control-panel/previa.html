@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<title>Prévia da transmissão</title>
+<style>
+  :root { --fundo: #0b0d12; --barra: #151923; --texto: #e6e8ee; --muted: #8a90a0; --borda: #2a3040; }
+  html, body { margin: 0; height: 100%; background: var(--fundo); color: var(--texto); font-family: "Segoe UI", Arial, sans-serif; overflow: hidden; }
+  header { height: 44px; display: flex; align-items: center; gap: 14px; padding: 0 14px; background: var(--barra); border-bottom: 1px solid var(--borda); font-size: 13px; }
+  header b { font-size: 14px; margin-right: 6px; }
+  header label { display: flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
+  header select { background: #0f121a; color: var(--texto); border: 1px solid var(--borda); border-radius: 4px; padding: 2px 4px; }
+  header .muted { color: var(--muted); margin-left: auto; }
+  #palco { position: absolute; top: 44px; left: 0; right: 0; bottom: 0; display: flex; align-items: center; justify-content: center; }
+  /* tela 1920x1080 escalada para caber na janela */
+  #tela { position: relative; width: 1920px; height: 1080px; flex: none; transform-origin: center center; outline: 1px solid var(--borda); }
+  #tela.cena-escura { background: radial-gradient(ellipse at 60% 40%, #3a4250 0%, #1c2129 55%, #0d1015 100%); }
+  #tela.cena-clara { background: linear-gradient(180deg, #9fb4c8 0%, #c9d3da 45%, #6b7a5c 46%, #4d5a40 100%); }
+  #tela.cena-xadrez { background: repeating-conic-gradient(#2a2f38 0 25%, #1f232a 0 50%) 0 0 / 32px 32px; }
+  iframe { position: absolute; border: 0; background: transparent; }
+  iframe.contorno { outline: 1px dashed rgba(255, 170, 0, 0.6); }
+  iframe[hidden] { display: none; }
+</style>
+</head>
+<body>
+<header>
+  <b>Prévia da transmissão</b>
+  <label><input type="checkbox" data-alvo="tabela" checked /> Tabela</label>
+  <label><input type="checkbox" data-alvo="card" checked /> Driver card</label>
+  <label><input type="checkbox" data-alvo="mapa" checked /> Mapa</label>
+  <label><input type="checkbox" data-alvo="gforce" checked /> G-force</label>
+  <label><input type="checkbox" data-alvo="piloto" /> Tabela do piloto</label>
+  <label><input type="checkbox" data-alvo="completa" /> Tabela completa</label>
+  <label>Fundo
+    <select id="cena">
+      <option value="cena-escura">Escuro</option>
+      <option value="cena-clara">Claro</option>
+      <option value="cena-xadrez">Xadrez</option>
+    </select>
+  </label>
+  <label><input type="checkbox" id="contorno" /> Contorno das fontes</label>
+  <span class="muted">Cada quadro tem o tamanho sugerido da fonte do OBS</span>
+</header>
+<div id="palco"><div id="tela" class="cena-escura">
+  <!-- posições como numa transmissão 1920x1080 -->
+  <iframe id="tabela"   src="/overlay/timing-table.html" style="left:20px;  top:0;     width:880px;  height:1080px"></iframe>
+  <iframe id="card"     src="/overlay/driver-card.html"  style="left:680px; top:850px; width:560px;  height:210px"></iframe>
+  <iframe id="mapa"     src="/overlay/track-map.html"    style="left:1480px;top:20px;  width:420px;  height:400px"></iframe>
+  <iframe id="gforce"   src="/overlay/g-force.html"      style="left:1600px;top:680px; width:300px;  height:380px"></iframe>
+  <iframe id="piloto"   data-src="/overlay/driver-table.html" style="left:1240px;top:440px; width:340px; height:620px" hidden></iframe>
+  <iframe id="completa" data-src="/overlay/full-timing.html"  style="left:0;top:0;width:1920px;height:1080px" hidden></iframe>
+</div></div>
+<script>
+  const tela = document.getElementById("tela");
+  function escalar() {
+    const p = document.getElementById("palco");
+    const s = Math.min(p.clientWidth / 1920, p.clientHeight / 1080);
+    tela.style.transform = `scale(${s})`;
+  }
+  addEventListener("resize", escalar);
+  escalar();
+
+  let salvo = {};
+  try { salvo = JSON.parse(localStorage.getItem("previa") || "{}"); } catch (_) {}
+  function guardar() { try { localStorage.setItem("previa", JSON.stringify(salvo)); } catch (_) {} }
+
+  document.querySelectorAll("input[data-alvo]").forEach((cb) => {
+    const fr = document.getElementById(cb.dataset.alvo);
+    if (cb.dataset.alvo in salvo) cb.checked = salvo[cb.dataset.alvo];
+    const aplicar = () => {
+      fr.hidden = !cb.checked;
+      // só carrega quando ligado (cada overlay abre a sua conexão com o servidor)
+      if (cb.checked && fr.dataset.src && !fr.src) fr.src = fr.dataset.src;
+    };
+    cb.addEventListener("change", () => { salvo[cb.dataset.alvo] = cb.checked; guardar(); aplicar(); });
+    aplicar();
+  });
+
+  const cena = document.getElementById("cena");
+  if (salvo.cena) cena.value = salvo.cena;
+  const aplicarCena = () => { tela.className = cena.value; };
+  cena.addEventListener("change", () => { salvo.cena = cena.value; guardar(); aplicarCena(); });
+  aplicarCena();
+
+  const contorno = document.getElementById("contorno");
+  contorno.checked = !!salvo.contorno;
+  const aplicarContorno = () => document.querySelectorAll("iframe").forEach((f) => f.classList.toggle("contorno", contorno.checked));
+  contorno.addEventListener("change", () => { salvo.contorno = contorno.checked; guardar(); aplicarContorno(); });
+  aplicarContorno();
+</script>
+</body>
+</html>

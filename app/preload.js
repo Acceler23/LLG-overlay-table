@@ -14,6 +14,13 @@ contextBridge.exposeInMainWorld("llgApp", {
     get: () => ipcRenderer.invoke("driver:get"),
     set: (patch) => ipcRenderer.invoke("driver:set", patch),
   },
+  // overlays do piloto (tabela, telemetria) e o modo de edicao na tela
+  pilot: {
+    get: () => ipcRenderer.invoke("pilot:get"),
+    set: (patch) => ipcRenderer.invoke("pilot:set", patch),
+    // a barrinha de uma janela em edicao mudou algo (tamanho, travou)
+    onChange: (fn) => ipcRenderer.on("pilot:changed", (_e, s) => fn(s)),
+  },
   // programas que abrem junto com o aplicativo (lista montada pelo usuario no painel)
   companion: {
     get: () => ipcRenderer.invoke("companion:get"),

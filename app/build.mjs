@@ -32,6 +32,8 @@ const ignore = [
   /^\/SharedMemory_AMS2\.h$/,
   /^\/start\.bat$/,
   /^\/app\/build\.mjs$/,
+  // script do instalador (o limpar.ps1 vai pelo proprio instalador)
+  /^\/installer($|\/)/,
   // imagem original do icone e o script que gera app/icon.ico e app/icon.png
   /^\/icon\.png$/,
   /^\/app\/make-icon\.ps1$/,
@@ -65,6 +67,15 @@ const [outDir] = await packager({
   icon: path.join(root, "app", "icon.ico"),
   ignore,
 });
+
+// O Electron traz as traducoes do Chromium (menus de contexto, caixas de
+// dialogo) em 55 idiomas, ~49 MB. Ficam so portugues, ingles e espanhol; num
+// Windows em outro idioma o Chromium usa o en-US.
+const KEEP_LOCALES = new Set(["en-US", "pt-BR", "pt-PT", "es", "es-419"]);
+const localesDir = path.join(outDir, "locales");
+for (const name of fs.readdirSync(localesDir)) {
+  if (name.endsWith(".pak") && !KEEP_LOCALES.has(name.slice(0, -4))) fs.rmSync(path.join(localesDir, name));
+}
 
 fs.writeFileSync(
   path.join(outDir, "LEIA-ME.txt"),

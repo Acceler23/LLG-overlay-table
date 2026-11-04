@@ -23,6 +23,7 @@ Automobilista 2, do Le Mans Ultimate, do Assetto Corsa Competizione e do Assetto
 ├── overlay/
 │   ├── timing-table.*     # tabela de tempos / pontuacao (Browser Source no OBS)
 │   ├── driver-card.*      # card do piloto em foco (Browser Source no OBS)
+│   ├── g-force.*          # força G e aceleração do piloto em foco (Browser Source no OBS)
 │   ├── driver-table.*     # tabela compacta para o piloto (classes + pontuacao ao vivo)
 │   ├── drivers-config.js  # cores, logos, nomes de classe e tabela de pontos
 │   ├── shared/            # codigo usado pela overlay E pelo servidor
@@ -120,9 +121,22 @@ O que muda no ACC:
 
 ## Carsets do Automobilista 2
 
-Na aba AMS2 do painel dá para baixar e instalar o carset (pinturas) de uma
-temporada. A lista vem do arquivo `AMS2_CarsetList.json` do repositório de
-imagens, com o nome da temporada e o link do arquivo no Google Drive:
+Em **Pilotar › Pinturas** cada temporada tem um botão de ligar e desligar
+(`server/carsetLibrary.js`, a mesma lógica do Cubic Paint Shop):
+- **Ligar**: na primeira vez baixa o carset e guarda numa biblioteca
+  (`carsets\` na pasta de dados). Depois copia só as texturas usadas para
+  `Overrides\<carro>\carset_<temporada>\` e acrescenta as pinturas no
+  `<carro>.xml` do jogo entre os marcadores
+  `<!-- TRANSPLANTE-CARSET:<temporada> -->` e `<!-- /TRANSPLANTE-CARSET:... -->`.
+- **Desligar**: tira exatamente isso. As pinturas do piloto (fora dos
+  marcadores) nunca são tocadas, um ID de pintura já ocupado nunca é
+  sobrescrito, e o `<carro>.xml` original fica copiado em `.xml.pre-transplante`.
+- O formato é o do Paint Shop: um carset ligado por um aparece ligado no outro.
+- Pode ligar com o jogo aberto; vale quando ele carregar de novo.
+
+A instalação antiga, descrita abaixo, continua no painel antigo. A lista vem do
+arquivo `AMS2_CarsetList.json` do repositório de imagens, com o nome da
+temporada e o link do arquivo no Google Drive:
 
 ```json
 [{ "Season": "Porsche Cup - Temporada 4", "CarSet": "https://drive.google.com/file/d/.../view" }]
@@ -196,6 +210,33 @@ Isso gera a pasta `dist/LLG Overlay-win32-x64` (não compactada, cerca de
 `LLG Overlay.exe` e um `LEIA-ME.txt`. Nem a chave do RLT nem o resto do seu
 `.env` vão junto.
 
+**Instalador (o jeito mais fácil para quem vai usar).** Um arquivo só, com
+assistente em português, atalho na área de trabalho e desinstalador:
+
+```bash
+npm run installer
+```
+
+Gera `dist/LLG-Overlay-Setup-vX.Y.Z.exe` (cerca de 110 MB), com a versão do
+`package.json`. Precisa do Inno Setup 6 (`winget install JRSoftware.InnoSetup`).
+Os arquivos ficam em [`installer/`](installer/).
+
+- Instala só para o usuário, **sem pedir administrador**, em
+  `%LOCALAPPDATA%\Programs\LLG Overlay`. A pasta aceita escrita, então a
+  atualização automática continua funcionando.
+- Cria o atalho "LLG Overlay" na área de trabalho e no menu Iniciar, e oferece
+  abrir o programa no fim.
+- Se o programa estiver aberto, avisa e o fecha antes de copiar. Instalar uma
+  versão nova por cima mantém as configurações.
+- **Desinstalar**: Configurações > Aplicativos > Aplicativos instalados >
+  LLG Overlay (ou "Desinstalar o LLG Overlay" no menu Iniciar). Fecha o programa,
+  apaga a pasta inteira e os atalhos, tira o app do Assetto Corsa que o painel
+  instala na pasta do jogo (e a linha dele no `python.ini`) e pergunta se apaga
+  também as configurações em `%APPDATA%\LLG Overlay`. Os carsets instalados no
+  AMS2 e as cenas criadas no OBS ficam: são do usuário.
+- Para testes: `/VERYSILENT` instala sem perguntar nada (fecha o programa se
+  estiver aberto); no desinstalador, `/VERYSILENT` mantém as configurações.
+
 **Chave do RLT.** Na primeira vez que alguém abre o aplicativo, o painel pede
 a chave de acesso e a guarda naquele computador (criptografada, no
 `settings.json` da pasta de dados do usuário). Depois disso não pergunta mais.
@@ -212,7 +253,8 @@ Quem tem o aplicativo e a chave criptografada consegue, com algum trabalho,
 chegar à chave do RLT, então só passe para quem pode tê-la.
 
 **Publicar uma versão pelo GitHub.** O arquivo `.github/workflows/release.yml`
-faz o GitHub montar o aplicativo e criar um Release com o zip para download.
+faz o GitHub montar o aplicativo e criar um Release com o instalador e o zip
+para download (o zip é o que a atualização automática baixa).
 Para disparar, crie uma tag de versão:
 
 ```bash
@@ -250,6 +292,29 @@ O aplicativo não é assinado: na primeira execução o Windows mostra o aviso d
 SmartScreen ("Mais informações" → "Executar assim mesmo").
 
 Em desenvolvimento, `npm run app` abre o mesmo aplicativo direto do código.
+
+## Desempenho (PC no limite)
+
+Medido num PC que mal roda o jogo (AMS2 + OBS + overlay, CPU a 93%):
+
+| Peça | Antes | Agora |
+| --- | --- | --- |
+| Leitor do AMS2 (`listener.ps1`) | ~40% de um núcleo, 4 leituras/s | ~0,8%, 7-10 leituras/s |
+| As 4 fontes do OBS visíveis (tabela, card, mapa, G-force) | ~41% | ~22% |
+| Só a tabela visível | ~18% | ~3% |
+| As 4 fontes escondidas | ~41% (escondida desenhava igual) | ~3% |
+| Leitor do LMU com o LMU fechado | ~4% | ~0,5% |
+
+- **Leitor do AMS2**: o trabalho de cada ciclo roda em C# compilado (o PowerShell só compila, com cache em `%LOCALAPPDATA%\LLG Overlay\cache`, e inicia). A saída é a mesma de antes, campo a campo. O leitor antigo fica em `listener-legacy.ps1`; `LLG_LISTENER_LEGACY=1` faz o aplicativo usar ele.
+- **Fonte escondida não desenha**: o OBS avisa a página quando a fonte some (`obsSourceVisibleChanged`). Ela continua recebendo e calculando (histórico dos intervalos, setores, mapa), mas não desenha; ao aparecer, desenha na hora com os dados atuais (`overlay/shared/framecap.js`).
+- **Escrita repetida não vira trabalho**: `overlay/shared/domguard.js`, o primeiro script de cada overlay, faz cada escrita no DOM (texto, classe, atributo, estilo) conferir o valor atual antes; igual, não escreve. Na fonte do OBS cada escrita fazia a página ser redesenhada e copiada, mesmo sem nada mudar na tela.
+- **Uma fonte só (opcional)**: `overlay/cena.html` (1920×1080) junta tabela, driver card, mapa e G-force. Mais barata com as quatro sempre visíveis, mas não dá para mostrar e esconder cada uma no OBS. Parâmetros: `?sem=mapa,gforce` tira overlays; `?mapa=1480,20` muda o lugar de uma (x,y em px).
+- **Montar no OBS**: `node tools/obs-montar.js` cria uma fonte por overlay na cena atual do OBS, com URL, tamanho e posição (precisa do servidor WebSocket do OBS ligado; a senha é lida do próprio OBS). `--unica` cria a fonte única (`cena.html`).
+- A memória dos jogos é aberta só para leitura.
+
+**Testar sem o jogo**: `node tools/replay-sessao.js [pasta]` reproduz uma sessão gravada pelo Cubic Racing Analyser pela mesma ponte do listener (`--vel=4`, `--inicio=600`, `--loop`).
+
+**Dados de exemplo do "Editar na tela"**: com as overlays do piloto destravadas e o jogo fora de sessão, elas mostram 30 s de uma corrida de Stock Car em Curitiba, em loop, com os nomes trocados ("Piloto 01"..., "Você"), para dar para posicionar e dimensionar com algo na tela (`server/demo.js`, arquivo `server/demo/curitiba-stockcar.json.gz`). Só as janelas do piloto em edição usam; as overlays do OBS ignoram. Para gerar outro trecho: `node tools/replay-sessao.js [pasta] --demo=server/demo/curitiba-stockcar.json.gz --inicio=600 --dur=30`.
 
 ## Como rodar
 
@@ -423,3 +488,20 @@ Os campos disponíveis na Shared Memory do AMS2 estão documentados em `SharedMe
 adicione a leitura do offset no `listener.ps1` e o campo na renderização em
 `overlay/timing-table.js`. Se o dado depende de histórico, calcule em
 `server/raceState.js`.
+
+## G-force (força G e aceleração do piloto em foco)
+
+`overlay/g-force.html` (Browser Source no OBS, fundo transparente, fonte sugerida 300 × 380) mostra, para o piloto em foco, um círculo de aderência com a força G lateral e longitudinal (rastro de 1,5 s), os valores, a velocidade, o maior valor dos últimos 10 s, a posição e as voltas (última e melhor). Liga e desliga pelo botão **G-force** do painel ou pela tecla **8** (com o jogo em foco); a escolha fica guardada na própria fonte do OBS. Parâmetros na URL: `?max=3` (G no anel externo), `?peaks=0` (sem a linha de picos), `?flip=acc` (inverte o lado da lateral estimada nesses jogos).
+
+Quem transmite costuma estar parado, e a telemetria completa do AMS2 é de um carro só. Por isso o cálculo escolhe a fonte sozinho, nesta ordem, e o selo do card diz qual está valendo (**TELEMETRIA** ou **ESTIMADO**):
+
+| Jogo | O que usa | Lateral | Longitudinal |
+|---|---|---|---|
+| AMS2 | `car.localAccel`, só se a velocidade dela bater com a do carro em foco; senão, estimativa | sim | sim |
+| LMU | `localAccel` de cada carro (`listener-lmu.ps1`), conferido contra a estimativa | sim | sim |
+| ACC | estimativa pela velocidade e posição da API de transmissão | sim (lado ainda não conferido, ver `?flip=acc`) | sim |
+| Assetto Corsa | estimativa pela velocidade (o app do jogo não manda a posição) | não | sim |
+
+A estimativa usa só o que o jogo informa de todos os carros (~10 leituras por segundo): a longitudinal é a inclinação da velocidade numa janela de 0,6 s e a lateral é a velocidade vezes a taxa de giro do rumo (`overlay/shared/gforce.js`). Conferida contra a telemetria real do AMS2 (Audi R8 no Spielberg e Cruze em Velocitta, com os dados degradados para 10 Hz e posição de 0,1 m): correlação de 0,88 na longitudinal e 0,94 na lateral, erro típico de 0,25 a 0,33 g. Serve para mostrar o que o carro está fazendo, não para medir. Os dados reais (AMS2 e LMU) são conferidos contra a estimativa e, se divergirem por alguns segundos, a overlay usa a estimativa.
+
+Ainda não conferido dentro do jogo: o lado da lateral no LMU e no ACC (nos dois, virar à direita deve levar o ponto para a direita) e se o `mLocalAccel` do LMU chega com os sinais esperados.
