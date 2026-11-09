@@ -316,23 +316,20 @@ function findPlayer(standings) {
 
 function findStandingsRow(entry) {
   if (!entry || !rltConfig || !Array.isArray(rltConfig.standingsRows)) return null;
+  // piloto reconhecido (da lista de pilotos ou da pontuacao): a linha dele, pelo nome inteiro
   const info = rltLookup(entry);
-  if (info && info.position != null && info.pointsRaw != null) {
-    const byName = rltConfig.standingsRows.find(
-      (r) =>
-        normalizeDriverName(r.displayName) === normalizeDriverName(info.displayName) ||
-        normalizeDriverName(r.driverName) === normalizeDriverName(info.driverName)
-    );
+  if (info) {
+    const same = (a, b) => !!a && !!b && normalizeDriverName(a) === normalizeDriverName(b);
+    const byName =
+      rltConfig.standingsRows.find((r) => same(r.driverName, info.driverName)) ||
+      rltConfig.standingsRows.find((r) => same(r.displayName, info.displayName));
     if (byName) return byName;
   }
+  // nao reconhecido: so pelo nome inteiro (os apelidos tem nome e sobrenome
+  // soltos e davam a pontuacao de outro piloto com o mesmo nome ou sobrenome)
   const keys = nameCandidates(entry.name);
   for (const r of rltConfig.standingsRows) {
-    const pool = [
-      normalizeDriverName(r.displayName),
-      normalizeDriverName(r.driverName),
-      normalizeDriverName(r.inGameName),
-      ...(r.aliases || []),
-    ].filter(Boolean);
+    const pool = [normalizeDriverName(r.displayName), normalizeDriverName(r.driverName), normalizeDriverName(r.inGameName)].filter(Boolean);
     for (const k of keys) {
       if (pool.includes(k)) return r;
     }
@@ -396,21 +393,27 @@ function renderNow() {
   // pontuacao so com temporada do RLT aplicada
   if (showingStandings() && rltConfig && rltConfig.standingsRows && rltConfig.standingsRows.length) {
     const row = findStandingsRow(entry);
-    const champPos = row && row.position != null && row.position < 999 ? row.position : "—";
-    const pts = row && row.points != null ? row.points : "—";
+    // temporada com mais de uma classe: posicao, pontos e gap DENTRO da classe do
+    // piloto (o RLT pontua cada classe a parte); com uma classe so, o geral
+    const multiClass = ((rltConfig.classes || []).length > 1) && row && row.classUniqueName && row.classUniqueName !== "—";
+    const posOf = (r) => (multiClass ? r.classPosition : r.position);
+    const ptsRaw = (r) => Number(multiClass ? (r.classPointsRaw != null ? r.classPointsRaw : r.pointsRaw) : r.pointsRaw) || 0;
+    const champPos = row && posOf(row) != null && posOf(row) < 999 ? posOf(row) : "—";
+    const pts = row ? (multiClass ? (row.classPoints != null ? row.classPoints : row.points) : row.points) : null;
     let gap = "—";
-    if (row && row.gapToLeader != null && String(row.gapToLeader).trim() !== "") {
+    if (!multiClass && row && row.gapToLeader != null && String(row.gapToLeader).trim() !== "") {
       gap = row.gapToLeader;
-    } else if (row && row.pointsRaw != null && rltConfig.standingsRows && rltConfig.standingsRows.length) {
-      const leader = rltConfig.standingsRows.reduce((a, b) =>
-        (Number(a.pointsRaw) || 0) >= (Number(b.pointsRaw) || 0) ? a : b
-      );
-      const diff = (Number(leader.pointsRaw) || 0) - (Number(row.pointsRaw) || 0);
+    } else if (row && rltConfig.standingsRows && rltConfig.standingsRows.length) {
+      const group = multiClass ? rltConfig.standingsRows.filter((r) => r.classUniqueName === row.classUniqueName) : rltConfig.standingsRows;
+      const leader = group.reduce((a, b) => (ptsRaw(a) >= ptsRaw(b) ? a : b));
+      const diff = ptsRaw(leader) - ptsRaw(row);
       gap = diff <= 0 ? "—" : `-${diff}`;
     }
+    const cls = multiClass ? (rltConfig.classes || []).find((c) => c.uniqueName === row.classUniqueName) : null;
+    const champLabel = multiClass ? `Campeonato ${(cls && cls.abbreviation) || row.className || ""}`.trim() : "Campeonato";
     stats.innerHTML = `
-      <div class="stat"><div class="v">${champPos}</div><div class="l">Campeonato</div></div>
-      <div class="stat"><div class="v">${pts}</div><div class="l">Pontos</div></div>
+      <div class="stat"><div class="v">${champPos}</div><div class="l">${champLabel}</div></div>
+      <div class="stat"><div class="v">${pts != null ? pts : "—"}</div><div class="l">Pontos</div></div>
       <div class="stat"><div class="v">${gap}</div><div class="l">Gap líder</div></div>
     `;
   } else if (isQualifying()) {
@@ -489,6 +492,7 @@ function connect() {
         checkBuildId(msg.buildId);
       } else if (msg.type === "rltConfig") {
         rltConfig = msg.data || null;
+        if (!!!(rltConfig && rltConfig.standingsRows && rltConfig.standingsRows.length)) standingsView = false; // sem pontuacao: volta para a corrida
         rebuildRltMatcher();
         render();
       } else if (msg.type === "assetsConfig") {
@@ -507,7 +511,7 @@ function connect() {
           if (battlePage.standings !== null) standingsView = battlePage.standings; // a copia daqui acompanha a tabela
           render();
         } else if (name === "overlay.toggleStandings") {
-          standingsView = !showingStandings();
+          standingsView = !!(rltConfig && rltConfig.standingsRows && rltConfig.standingsRows.length) && !showingStandings();
           render();
         } else if (name === "overlay.setStandings") {
           standingsView = !!(msg.payload && msg.payload.value);

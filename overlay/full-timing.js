@@ -631,9 +631,11 @@ function showingChampionship() {
 
 const normalize = LLGNames.normalizeName;
 
-// nomes (normalizados) de um piloto do RLT: o de exibicao, o do RLT e os apelidos
+// nomes (normalizados) de um piloto do RLT: o de exibicao, o do RLT e o do jogo.
+// Os apelidos (aliases) nao entram: tem o primeiro nome e o sobrenome soltos e
+// casavam outro piloto com o mesmo nome ou sobrenome.
 function rowKeys(row) {
-  return [normalize(row.displayName), normalize(row.driverName), normalize(row.inGameName), ...(row.aliases || [])].filter(Boolean);
+  return [normalize(row.displayName), normalize(row.driverName), normalize(row.inGameName)].filter(Boolean);
 }
 
 // Posicao de cada piloto na CLASSE na corrida em andamento, pelos nomes, para
@@ -654,8 +656,8 @@ function liveClassPositions() {
       .forEach((e, i) => {
         const info = rltLookup(e);
         const keys = [normalize(e.name)];
-        if (info) keys.push(normalize(info.displayName || ""), ...(info.aliases || []));
-        keys.filter(Boolean).forEach((k) => map.set(k, i + 1));
+        if (info) keys.push(normalize(info.driverName || ""), normalize(info.displayName || ""));
+        keys.filter(Boolean).forEach((k) => map.has(k) || map.set(k, i + 1));
       });
   });
   return map;
@@ -667,7 +669,10 @@ function liveKeys() {
   standings.forEach((e) => {
     set.add(normalize(e.name));
     const info = rltLookup(e);
-    if (info) set.add(normalize(info.displayName || ""));
+    if (info) {
+      set.add(normalize(info.driverName || ""));
+      set.add(normalize(info.displayName || ""));
+    }
   });
   return set;
 }
@@ -954,6 +959,7 @@ function connect() {
       renderLog();
     } else if (msg.type === "rltConfig") {
       rltConfig = msg.data || null;
+      if (!!!(rltConfig && rltConfig.standingsRows && rltConfig.standingsRows.length)) championshipView = false; // sem pontuacao: volta para a corrida
       rebuildMatcher();
       render();
       renderLog();
@@ -971,10 +977,20 @@ function connect() {
       frozenGaps.clear();
       battleDetector.reset();
     } else if (msg.type === "overlayCommand" && (msg.name === "overlay.toggleStandings" || msg.name === "overlay.setStandings")) {
-      // tecla 0 / painel: troca junto com a tabela de tempos
-      championshipView = msg.name === "overlay.toggleStandings" ? !championshipView : !!(msg.payload && msg.payload.value);
+      // tecla 0 / painel: troca junto com a tabela de tempos. Alterna o que esta NA
+      // TELA (antes alternava um sinal proprio, que saia de sincronia quando nao
+      // havia pontuacao para mostrar e depois aparecia invertido, "travado")
+      championshipView = msg.name === "overlay.toggleStandings" ? !!(rltConfig && rltConfig.standingsRows && rltConfig.standingsRows.length) && !showingChampionship() : !!(msg.payload && msg.payload.value);
       pageIndex = 0;
       render();
+    } else if (msg.type === "overlayCommand" && msg.name === "overlay.battleState") {
+      // a tabela de tempos avisa a cada 2 s se a pontuacao esta na tela: segue ela
+      const st = msg.payload && msg.payload.standings;
+      if (typeof st === "boolean" && st !== championshipView) {
+        championshipView = st;
+        pageIndex = 0;
+        render();
+      }
     }
   });
   socket.addEventListener("close", () => setTimeout(connect, 500));

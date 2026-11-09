@@ -661,6 +661,9 @@ function connect() {
       applyOverlayCommand(msg.name, msg.payload || {});
     } else if (msg.type === "rltConfig") {
       rltConfig = msg.data || null;
+      // sem pontuacao (temporada pausada fora da sessao da liga, ou tirada): a tela
+      // volta para a corrida, e nao reaparece sozinha na pontuacao depois
+      if (!!!(rltConfig && rltConfig.standingsRows && rltConfig.standingsRows.length)) standingsView = false;
       rebuildRltMatcher();
       if (latestStandings.length) render(latestStandings);
     } else if (msg.type === "assetsConfig") {
@@ -699,7 +702,7 @@ function applyOverlayCommand(name, payload = {}) {
   } else if (name === "overlay.toggleStandings") {
     // alterna o que esta NA TELA: sem temporada com pontuacao, o 0 nao deixa um
     // "ligado" escondido que apareceria sozinho depois
-    standingsView = !showingStandings();
+    standingsView = !!(rltConfig && rltConfig.standingsRows && rltConfig.standingsRows.length) && !showingStandings();
   } else if (name === "overlay.setStandings") {
     // define a tela direto (posicoes ou pontuacao), em vez de alternar
     standingsView = !!payload.value;
@@ -1099,11 +1102,8 @@ function rltTeamName(entry) {
   if (rltConfig && Array.isArray(rltConfig.standingsRows)) {
     const keys = nameCandidates(entry.name || "").filter(Boolean);
     for (const row of rltConfig.standingsRows) {
-      const rowKeys = [
-        normalizeDriverName(row.displayName),
-        normalizeDriverName(row.driverName),
-        ...(row.aliases || []),
-      ].filter(Boolean);
+      // nome inteiro so (os apelidos tem nome e sobrenome soltos: pegariam outro piloto)
+      const rowKeys = [normalizeDriverName(row.displayName), normalizeDriverName(row.driverName), normalizeDriverName(row.inGameName)].filter(Boolean);
       if (keys.some((k) => rowKeys.includes(k)) && row.teamName) return row.teamName;
     }
   }
@@ -1546,37 +1546,36 @@ function liveRacePosByDriver(standings, classMode) {
       list
         .filter((e) => !isDnf(e)) // quem abandonou nao projeta pontos
         .sort((a, b) => a.position - b.position)
-        .forEach((e, i) => {
-          const racePos = i + 1;
-          const info = rltLookup(e);
-          map.set(normalizeDriverName(e.name), racePos);
-          if (info) {
-            map.set(normalizeDriverName(info.displayName || ""), racePos);
-            (info.aliases || []).forEach((a) => map.set(a, racePos));
-          }
-        });
+        .forEach((e, i) => setLivePos(map, e, i + 1));
     });
   } else {
     standings.forEach((e) => {
       if (isDnf(e)) return; // quem abandonou nao projeta pontos
-      const racePos = e.position;
-      const info = rltLookup(e);
-      map.set(normalizeDriverName(e.name), racePos);
-      if (info) {
-        map.set(normalizeDriverName(info.displayName || ""), racePos);
-        (info.aliases || []).forEach((a) => map.set(a, racePos));
-      }
+      setLivePos(map, e, e.position);
     });
   }
   return map;
 }
 
+// Chaves da posicao ao vivo de um carro: o nome no jogo e o piloto do RLT
+// reconhecido (nome no RLT e de exibicao). Os apelidos (aliases) nao entram:
+// eles tem pedacos do nome ("gomes", "daniel") e casavam outro piloto da
+// pontuacao com a posicao deste.
+function setLivePos(map, e, racePos) {
+  const put = (v) => {
+    const k = normalizeDriverName(v || "");
+    if (k && !map.has(k)) map.set(k, racePos);
+  };
+  put(e.name);
+  const info = rltLookup(e);
+  if (info) {
+    put(info.driverName);
+    put(info.displayName);
+  }
+}
+
 function lookupLivePos(row, liveMap) {
-  const keys = [
-    normalizeDriverName(row.displayName),
-    normalizeDriverName(row.driverName),
-    ...(row.aliases || []),
-  ];
+  const keys = [normalizeDriverName(row.driverName), normalizeDriverName(row.displayName), normalizeDriverName(row.inGameName)];
   for (const k of keys) {
     if (k && liveMap.has(k)) return liveMap.get(k);
   }
@@ -1671,10 +1670,22 @@ function buildStandingsDisplayList(standings) {
       if (k === "—") return;
       (groups[k] = groups[k] || []).push(r);
     });
+    // ordem das classes: na corrida, a classe com o carro mais a frente primeiro;
+    // fora dela (ou empate), a ordem das classes na temporada (antes: alfabetica,
+    // e a Amador vinha acima da Pro)
+    const seasonOrder = (k) => {
+      const i = ((rltConfig && rltConfig.classes) || []).findIndex((c) => c.uniqueName === k || c.name === k);
+      return i < 0 ? 999 : i;
+    };
+    const bestRacePos = (k) => {
+      if (!isRaceSession()) return 999;
+      const pos = (standings || []).filter((e) => !isDnf(e) && groupKey(e, standings) === k).map((e) => e.position || 999);
+      return pos.length ? Math.min(...pos) : 999;
+    };
     const classKeys = Object.keys(groups).sort((a, b) => {
       const na = (groups[a][0] && groups[a][0].className) || a;
       const nb = (groups[b][0] && groups[b][0].className) || b;
-      return String(na).localeCompare(String(nb));
+      return bestRacePos(a) - bestRacePos(b) || seasonOrder(a) - seasonOrder(b) || String(na).localeCompare(String(nb));
     });
     return paginateByClass(
       classKeys,
@@ -1783,13 +1794,17 @@ function renderStandings(standings) {
 
   const me = (standings || []).find((e) => isStablePlayer(e));
   const meInfo = me ? rltLookup(me) : null;
+  // piloto assistido: o nome no jogo e o piloto do RLT reconhecido. Os apelidos
+  // (aliases) nao entram: tem o primeiro nome e o sobrenome soltos, e destacavam
+  // junto quem tinha um deles igual.
   const meKeys = new Set();
   if (me) {
     meKeys.add(normalizeDriverName(me.name));
     if (meInfo) {
-      meKeys.add(normalizeDriverName(meInfo.displayName));
-      (meInfo.aliases || []).forEach((a) => meKeys.add(a));
+      meKeys.add(normalizeDriverName(meInfo.driverName || ""));
+      meKeys.add(normalizeDriverName(meInfo.displayName || ""));
     }
+    meKeys.delete("");
   }
 
   displayList.forEach((item, i) => {
@@ -1841,11 +1856,7 @@ function renderStandings(standings) {
     applyTeamTint(el, row.teamPrimaryColor);
     let isAssisted = false;
     if (playerHighlightEnabled && meKeys.size) {
-      const rowKeys = [
-        normalizeDriverName(row.displayName),
-        normalizeDriverName(row.driverName),
-        ...(row.aliases || []),
-      ];
+      const rowKeys = [normalizeDriverName(row.driverName), normalizeDriverName(row.displayName), normalizeDriverName(row.inGameName)];
       isAssisted = rowKeys.some((k) => k && meKeys.has(k));
     }
     el.classList.toggle("player", isAssisted);
@@ -2464,7 +2475,7 @@ document.addEventListener("keydown", (e) => {
   const c = e.code;
   const k = e.key;
   if (c === "Digit0" || c === "Numpad0" || k === "0") {
-    standingsView = !standingsView;
+    standingsView = !!(rltConfig && rltConfig.standingsRows && rltConfig.standingsRows.length) && !showingStandings(); // alterna o que esta na tela (igual ao comando)
     render(latestStandings);
     return;
   }
