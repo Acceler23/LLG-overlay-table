@@ -25,6 +25,7 @@
 const crypto = require("crypto");
 const { createIncidentWatch, markLmuYellow } = require("./incidents");
 const { createGameIncidents } = require("./lmuIncidents");
+const { createRaceMarks } = require("./raceMarks");
 
 const PORT = process.env.LMU_API_PORT || 6397;
 const CHAT_URL = `http://127.0.0.1:${PORT}/rest/chat/`;
@@ -218,6 +219,7 @@ function createRaceControl(settings, opts = {}) {
   let waveLast = null; // ultima lista mandada: { names, at }
   const incidents = createIncidentWatch({ now }); // carro lento e ultrapassagem com SC/FCY
   const game = opts.gameIncidents || createGameIncidents(); // incidentes do jogo e replay
+  const marks = createRaceMarks({ settings, now }); // FCY queimado e ultrapassagem: ficam ate limpar ou um DT
   let countdownEndAt = 0; // fim da contagem do FCY atual
   let greenAt = 0; // bandeira verde marcada (contagem para encerrar o FCY); 0: nenhuma
   let lmuSeenAt = 0; // ultimo dado do LMU (so le o chat com o jogo aberto)
@@ -285,6 +287,7 @@ function createRaceControl(settings, opts = {}) {
     breachKmh: FCY_LIMIT_KMH + FCY_MARGIN_KMH,
     messages: messages(),
     breaches: breaches.concat(liveOver()),
+    marks: marks.list(),
     waveLeft: sc && waveAt ? Math.max(0, Math.ceil((waveAt - now()) / 1000)) : 0,
     waveLast,
     incidents: incidents.status(),
@@ -350,6 +353,14 @@ function createRaceControl(settings, opts = {}) {
     const b = { name, carNumber: o.carNumber, overMs: t - o.start, afterMs: o.start - countdownEndAt, maxKmh: o.maxKmh, fcy: fcyNumber, at: o.start, et: o.et };
     breaches.push(b);
     fresh.push(b);
+    marks.addFcy(b);
+  }
+
+  // limpar os marcadores de FCY queimado e ultrapassagem: um piloto ou todos
+  function clearMarks(token, name) {
+    if (!allowed(token)) return { ok: false, error: "Aba bloqueada" };
+    marks.clear(name ? String(name) : null);
+    return status();
   }
 
   function closeAll(t) {
@@ -669,6 +680,8 @@ function createRaceControl(settings, opts = {}) {
       scName: scCarName(payload.standings),
       released: waveLast ? waveLast.names : [], // retardatarios liberados podem passar
     });
+    marks.addPasses(incidents.status().overtakes);
+    marks.noteStandings(payload.standings); // DT recebido limpa os marcadores do piloto
 
     if (fcy && t >= countdownEndAt) {
       const seen = new Set();
@@ -702,7 +715,7 @@ function createRaceControl(settings, opts = {}) {
     return payload;
   }
 
-  return { status, unlock, allowed, lock, replayJump, replayExit, setMessages, setFcy, setSc, waveBy, setScCar, setFollow, pollChat, apply };
+  return { status, unlock, allowed, lock, replayJump, replayExit, setMessages, setFcy, setSc, waveBy, setScCar, setFollow, pollChat, apply, clearMarks };
 }
 
 module.exports = { createRaceControl, hashPassword, checkPassword, sendChat, matchMessage, splitChat, lappedInQueue, resolveScCar, DEFAULT_MESSAGES, FCY_LIMIT_KMH };

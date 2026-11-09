@@ -110,6 +110,7 @@ button { font-family: inherit; cursor: pointer; }
 .tool:disabled { opacity: 0.45; cursor: default; }
 .tool-status { font-size: 14px; color: #bcd; }
 .tool.live { background: #c62828; color: #fff; }
+.tool.marks { background: transparent; border: 1px solid #ffd400; color: #ffd400; }
 .tool.sound { margin-left: auto; background: transparent; border: 1px solid #3a5a8c; color: #fff; }
 .tool.sound.off { color: #8aa; }
 .tool.logout { background: transparent; border: 1px solid #3a5a8c; color: #bcd; }
@@ -130,7 +131,7 @@ button { font-family: inherit; cursor: pointer; }
 
 .rc-row {
   display: grid;
-  grid-template-columns: 52px 52px minmax(140px, 1fr) 48px minmax(0, 200px) 70px minmax(150px, 220px);
+  grid-template-columns: 52px 52px minmax(140px, 1fr) 48px minmax(0, 200px) 70px minmax(150px, 320px);
   align-items: stretch;
 }
 
@@ -175,13 +176,16 @@ button { font-family: inherit; cursor: pointer; }
 .rc-head .c-speed { justify-content: flex-end; }
 
 /* situacao: etiquetas */
-.c-state { gap: 4px; }
+.c-state { gap: 4px; overflow: hidden; }
 .tag { padding: 2px 6px; border-radius: 3px; font-size: 12px; font-weight: 800; letter-spacing: 0.4px; white-space: nowrap; }
 .tag.box { background: #ffd400; color: #111; }
 .tag.slow { background: #ff3b3b; color: #fff; }
 .tag.over { background: #ff3b3b; color: #fff; }
 .tag.sccar { background: #ff8c1a; color: #111; }
 .tag.dnf { background: #555; color: #ddd; }
+/* infracoes da sessao (mesmas cores do log): FCY queimado e ultrapassagem com SC/FCY */
+.tag.fcyburn { background: #ffd400; color: #111; cursor: pointer; }
+.tag.overtake { background: #ff8c1a; color: #111; cursor: pointer; }
 
 /* linhas em destaque: lento agora (vermelho), acima do limite no FCY (amarelo) */
 #rows .rc-row.slow { background-color: #8f1d1d; }

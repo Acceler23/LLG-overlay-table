@@ -110,6 +110,17 @@ document.getElementById("logoutBtn").addEventListener("click", async () => {
   setToken("");
 });
 document.getElementById("waveBtn").addEventListener("click", () => tool("/api/lmu/sc/waveby", {}, "Retardatários: nomes em 10 s."));
+// marcadores de FCY queimado e ultrapassagem: todos no botao, um piloto clicando na etiqueta dele
+document.getElementById("clearMarksBtn").addEventListener("click", () => {
+  if (!confirm("Limpar os marcadores QUEIMOU FCY e ULTRAPASSOU de todos os pilotos?")) return;
+  tool("/api/lmu/marks/clear", {}, "Marcadores limpos.");
+});
+document.getElementById("rows").addEventListener("click", (ev) => {
+  const tag = ev.target.closest(".tag.fcyburn, .tag.overtake");
+  const name = tag && tag.parentElement.dataset.name;
+  if (!name || !confirm(`Limpar os marcadores de ${name}?`)) return;
+  tool("/api/lmu/marks/clear", { name }, `Marcadores de ${name} limpos.`);
+});
 
 function showControl(st) {
   control = st;
@@ -122,6 +133,7 @@ function showControl(st) {
   scBtn.textContent = st.scIn ? "SC NESSA VOLTA · BANDEIRA VERDE AGORA" : st.sc ? "ENCERRAR SAFETY CAR" : "SAFETY CAR";
   document.getElementById("waveBtn").disabled = !st.sc || st.waveLeft > 0;
   document.getElementById("liveBtn").hidden = !st.replayActive;
+  document.getElementById("clearMarksBtn").disabled = !(st.marks && st.marks.length);
   queueRender();
 }
 
@@ -186,6 +198,21 @@ function liveNow(st) {
   };
 }
 
+// Marcadores por piloto, para a coluna SITUACAO: quem queimou o FCY (cada
+// trecho acima do limite, com o numero do FCY) e quem ultrapassou com SC/FCY
+// (sem contar retardatario liberado). Vem do servidor (server/raceMarks.js) e
+// ficam ate a direcao limpar (botao, ou clique na etiqueta) ou o piloto receber
+// um drive-through. O detalhe de cada infracao esta no log ao lado.
+function sessionInfractions(st) {
+  const fcy = new Map(); // nome -> [numeros dos FCY]
+  const passes = new Map(); // nome -> [quem foi ultrapassado]
+  ((st && st.marks) || []).forEach((m) => {
+    if (m.fcy.length) fcy.set(m.name, m.fcy.map((f) => f.fcy));
+    if (m.passes.length) passes.set(m.name, m.passes.map((o) => `${o.passed} (${o.under}${o.countdown ? ", na contagem" : ""})`));
+  });
+  return { fcy, passes };
+}
+
 function renderHeader(st) {
   const session = (data && data.session) || {};
   const track = LLGDisplay.trackDisplay(session.trackLocation || "", session.trackVariation || "");
@@ -218,6 +245,7 @@ function renderRows(st) {
   const ordered = list.slice().sort((a, b) => (outOfRace(a) ? 1 : 0) - (outOfRace(b) ? 1 : 0) || (a.position || 999) - (b.position || 999));
   const multiClass = new Set(ordered.map((e) => grouper.key(e, ordered))).size > 1;
   const t = liveNow(st);
+  const inf = sessionInfractions(st);
   const scName = st && st.scCar ? st.scCar.name : null;
   const fcyLive = !!(st && st.fcy && !(st.countdownLeft > 0));
   const green = !(st && (st.fcy || st.sc)) && !(data && data.session && data.session.scOut);
@@ -279,8 +307,17 @@ function renderRows(st) {
     else if (pit) tags.push(["box", "BOX"]);
     if (slowNow) tags.push(["slow", `LENTO ${secs(slowNow.durationMs)}`]);
     if (overNow) tags.push(["over", `ACIMA DO LIMITE · ${secs(overNow.overMs)}`]);
+    // infracoes da sessao: ficam ate a sessao acabar
+    const burned = inf.fcy.get(e.name);
+    if (burned) {
+      const fcys = [...new Set(burned)].sort((a, b) => a - b).join(", ");
+      tags.push(["fcyburn", `QUEIMOU FCY${burned.length > 1 ? ` x${burned.length}` : ""}`, `FCY queimado: ${burned.length}x (FCY ${fcys}). Clique para limpar.`]);
+    }
+    const passed = inf.passes.get(e.name);
+    if (passed) tags.push(["overtake", `ULTRAPASSOU${passed.length > 1 ? ` x${passed.length}` : ""}`, `Ultrapassou com SC/FCY: ${passed.join("; ")}. Clique para limpar.`]);
     const state = cell(row, "c-state");
-    const html = tags.map(([c, txt]) => `<span class="tag ${c}">${txt}</span>`).join("");
+    state.dataset.name = e.name;
+    const html = tags.map(([c, txt, tip]) => `<span class="tag ${c}"${tip ? ` title="${esc(tip)}"` : ""}>${txt}</span>`).join("");
     if (state.innerHTML !== html) state.innerHTML = html;
 
   });

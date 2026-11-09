@@ -327,6 +327,9 @@ app.get("/api/overlay/alternate", (req, res) => {
 const LLGNames = require("../overlay/shared/names");
 let manualLinks = settings.get("manualLinks") || {};
 rlt.setManualLinks(manualLinks);
+// classe escolhida a mao para quem veio sem classe: { temporada: { piloto: classe } }
+let manualClasses = settings.get("manualClasses") || {};
+rlt.setManualClasses(manualClasses);
 let sessionNames = [];
 let linkStatus = { season: null, unmatched: [], ignored: [], linked: [], free: [] };
 
@@ -424,6 +427,35 @@ app.post("/api/links", (req, res) => {
   broadcastRlt();
   updateLinkStatus();
   res.json({ ok: true, ...linkStatus, manual: rlt.getManualLinks() });
+});
+
+// Pilotos sem classe na temporada aplicada (ex: lineup do backup que ainda
+// nao pontuou): o painel escolhe a classe de cada um.
+app.get("/api/rlt/classless", (req, res) => {
+  const cfg = rlt.getOverlayPayload();
+  if (!cfg) return res.json({ ok: true, season: null, classes: [], drivers: [] });
+  res.json({ ok: true, season: cfg.seasonName || null, ...rlt.classlessDrivers() });
+});
+
+// { driver: "piloto do RLT", classUniqueName: "classe" | null (volta a sem classe) }
+app.post("/api/rlt/classless", (req, res) => {
+  const cfg = rlt.getOverlayPayload();
+  if (!cfg || !cfg.seasonId) return res.status(400).json({ ok: false, error: "Aplique uma temporada primeiro." });
+  const driver = String((req.body && req.body.driver) || "").trim();
+  if (!driver) return res.status(400).json({ ok: false, error: "Piloto vazio." });
+  const want = req.body && req.body.classUniqueName ? String(req.body.classUniqueName) : null;
+  const { classes } = rlt.classlessDrivers();
+  if (want && !classes.some((c) => c.uniqueName === want)) return res.status(400).json({ ok: false, error: "Classe que nao existe nesta temporada." });
+  const season = String(cfg.seasonId);
+  const forSeason = Object.assign({}, manualClasses[season] || {});
+  if (want) forSeason[driver] = want;
+  else delete forSeason[driver];
+  manualClasses = Object.assign({}, manualClasses, { [season]: forSeason });
+  if (!Object.keys(forSeason).length) delete manualClasses[season];
+  settings.set("manualClasses", Object.keys(manualClasses).length ? manualClasses : null);
+  rlt.setManualClasses(manualClasses);
+  broadcastRlt();
+  res.json({ ok: true, season: cfg.seasonName || null, ...rlt.classlessDrivers() });
 });
 
 // ---- log da corrida (tabela completa): ultrapassagens, melhores voltas, box, punicoes ----
@@ -761,6 +793,8 @@ app.post("/api/lmu/replay/exit", async (req, res) => {
   }
 });
 app.post("/api/lmu/sc/car", (req, res) => lmuReply(res, raceControl.setScCar(lmuToken(req), req.body && req.body.name)));
+// marcadores de FCY queimado e ultrapassagem: { name } limpa um piloto; sem nome, todos
+app.post("/api/lmu/marks/clear", (req, res) => lmuReply(res, raceControl.clearMarks(lmuToken(req), req.body && req.body.name)));
 app.post("/api/lmu/sc/waveby", async (req, res) => {
   try {
     lmuReply(res, await raceControl.waveBy(lmuToken(req)));
@@ -994,16 +1028,18 @@ app.post("/api/rlt/key", async (req, res) => {
   }
 });
 
+// Temporadas: as da API (com chave valida) e, sempre, as do backup do Drive
+// (server/rltBackup.js), que funcionam sem a API (chave vencida, sem chave).
 app.get("/api/rlt/seasons", async (req, res) => {
-  try {
-    if (!rlt.hasKey()) return res.status(401).json({ ok: false, error: "API key ausente" });
-    if (!rlt.getActiveSeasons().length) {
-      await rlt.fetchLeague();
-      await rlt.fetchSeasons();
-    }
-    res.json({
-      ok: true,
-      seasons: rlt.getActiveSeasons().map((s) => ({
+  let apiSeasons = [];
+  let apiError = null;
+  if (rlt.hasKey()) {
+    try {
+      if (!rlt.getActiveSeasons().length) {
+        await rlt.fetchLeague();
+        await rlt.fetchSeasons();
+      }
+      apiSeasons = rlt.getActiveSeasons().map((s) => ({
         seasonId: s.seasonId,
         seasonName: s.fullName || s.seasonName,
         isMulticlassDefined: s.isMulticlassDefined,
@@ -1011,12 +1047,26 @@ app.get("/api/rlt/seasons", async (req, res) => {
         completedStatus: s.completedStatus,
         totalRounds: s.totalRounds,
         completedRounds: s.completedRounds,
-      })),
-    });
-  } catch (e) {
-    console.error("[RLT] /api/rlt/seasons", e.message);
-    res.status(e.status || 500).json({ ok: false, error: e.message });
+      }));
+    } catch (e) {
+      apiError = e.message;
+      console.error("[RLT] /api/rlt/seasons (API)", e.message);
+    }
+  } else {
+    apiError = "API key ausente";
   }
+  let backupSeasons = [];
+  let backupError = null;
+  try {
+    backupSeasons = await rlt.listBackupSeasons();
+  } catch (e) {
+    backupError = e.message;
+    console.error("[RLT] /api/rlt/seasons (backup)", e.message);
+  }
+  if (!apiSeasons.length && !backupSeasons.length) {
+    return res.status(502).json({ ok: false, error: apiError || backupError || "Nenhuma temporada" });
+  }
+  res.json({ ok: true, seasons: apiSeasons.concat(backupSeasons), apiError, backupError });
 });
 
 app.post("/api/rlt/season", async (req, res) => {
@@ -1030,7 +1080,7 @@ app.post("/api/rlt/season", async (req, res) => {
       return res.json({ ok: true, payload, status: rlt.getStatus(), mode: "game-only" });
     }
     const payload = await rlt.selectSeason(seasonId);
-    settings.set("seasonId", Number(seasonId));
+    settings.set("seasonId", rlt.isBackupId(seasonId) ? seasonId : Number(seasonId)); // "drive:...": temporada do backup
     updateLinkStatus(); // ja decide se a sessao atual e da liga
     broadcastRlt();
     res.json({ ok: true, payload, status: rlt.getStatus() });
@@ -1206,6 +1256,18 @@ server.listen(HTTP_PORT, async () => {
   console.log(ALLOW_LAN ? "Acesso liberado para a rede local (ALLOW_LAN)." : "Acesso restrito a este computador.");
   console.log(assetsBaseUrl ? `Imagens: ${assetsBaseUrl} (reserva: pasta local)` : "Imagens: somente pasta local.");
   if (!rlt.hasKey()) console.log("RLT sem chave: salve pelo painel ou defina RLT_API_KEY no arquivo .env.");
+  // temporada do backup do Drive: reaplica sem precisar da API
+  const savedBackupSeason = settings.get("seasonId");
+  if (rlt.isBackupId(savedBackupSeason)) {
+    try {
+      const payload = await rlt.selectSeason(savedBackupSeason);
+      updateLinkStatus();
+      broadcastRlt();
+      console.log(`Temporada reaplicada (backup do Drive): ${(payload && payload.seasonName) || savedBackupSeason}`);
+    } catch (err) {
+      console.warn("Backup do Drive: nao foi possivel carregar agora:", err.message);
+    }
+  }
   if (rlt.hasKey()) {
     try {
       // o que mudou no RLT enquanto o aplicativo estava fechado (o resto vem do cache)
@@ -1214,7 +1276,7 @@ server.listen(HTTP_PORT, async () => {
       await rlt.fetchSeasons();
       // reaplica a temporada que estava em uso antes de fechar
       const savedSeason = settings.get("seasonId");
-      if (savedSeason) {
+      if (savedSeason && !rlt.isBackupId(savedSeason)) {
         const payload = await rlt.selectSeason(savedSeason);
         broadcastRlt();
         console.log(`Temporada do RLT reaplicada: ${(payload && payload.seasonName) || savedSeason}`);

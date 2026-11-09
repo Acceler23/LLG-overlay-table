@@ -19,6 +19,43 @@ let game = "ams2";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+// ---- classe de cada carro: a mesma regra da tabela de tempos ----
+// Com temporada aplicada (do RLT ou do backup), a cor e a posicao na classe
+// vem da classe do piloto na temporada. Sem temporada, a cor do carro/classe
+// do jogo, como sempre foi.
+const RLT_MATCH_MIN = 0.98; // igual a tabela de tempos
+let rltConfig = null;
+let rltMatcher = null;
+
+function rltEnabled() {
+  return !!(rltConfig && rltConfig.classes && rltConfig.classes.length > 0);
+}
+
+function rebuildRltMatcher() {
+  const hasDrivers = rltConfig && ((rltConfig.drivers && rltConfig.drivers.length) || (rltConfig.standingsRows && rltConfig.standingsRows.length));
+  rltMatcher = hasDrivers
+    ? LLGNames.createMatcher(LLGNames.buildPool(rltConfig), {
+        explicitMap: Object.assign({}, typeof RLT_INGAME_MAP !== "undefined" ? RLT_INGAME_MAP : {}, (rltConfig && rltConfig.manualLinks) || {}),
+        minScore: RLT_MATCH_MIN,
+      })
+    : null;
+  if (rltMatcher) rltMatcher.prime(standings.map((e) => e.name));
+}
+
+const grouper = LLGGroups.createGrouper({
+  rltEnabled: () => rltEnabled(),
+  lookup: (entry) => (rltMatcher && entry ? rltMatcher.lookup(entry.name || "") : null),
+  splitClasses: typeof SPLIT_BY_CAR_CLASSES !== "undefined" ? SPLIT_BY_CAR_CLASSES : [],
+});
+
+function carClassKey(e) {
+  return rltEnabled() ? grouper.key(e, standings) : e.carClass;
+}
+
+function carColor(e) {
+  return rltEnabled() ? LLGDisplay.classColor(grouper.key(e, standings), rltConfig.classes) : LLGDisplay.classColor(e.carClass, null);
+}
+
 // ---- tracado ----
 function setMap(next) {
   map = next && next.points && next.points.length > 10 ? next : null;
@@ -197,8 +234,9 @@ function renderNow() {
   // lider de cada classe (o de melhor posicao na classe)
   const leaderByClass = new Map();
   cars.forEach((e) => {
-    const cur = leaderByClass.get(e.carClass);
-    if (!cur || (e.position || 999) < (cur.position || 999)) leaderByClass.set(e.carClass, e);
+    const k = carClassKey(e);
+    const cur = leaderByClass.get(k);
+    if (!cur || (e.position || 999) < (cur.position || 999)) leaderByClass.set(k, e);
   });
   const leaders = new Set(leaderByClass.values());
   // posicao de cada carro dentro da classe (e o numero que aparece no circulo)
@@ -208,8 +246,9 @@ function renderNow() {
     .slice()
     .sort((a, b) => (a.position || 999) - (b.position || 999))
     .forEach((e) => {
-      const n = (byClass.get(e.carClass) || 0) + 1;
-      byClass.set(e.carClass, n);
+      const k = carClassKey(e);
+      const n = (byClass.get(k) || 0) + 1;
+      byClass.set(k, n);
       classPos.set(e, n);
     });
   const seen = new Set();
@@ -231,7 +270,7 @@ function renderNow() {
     const [x, y] = pointAt(lapDistanceOf(e));
     g.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
     g.setAttribute("class", `tm-car${e.isPlayer ? " focus" : ""}${(e.pitMode || 0) !== 0 ? " pit" : ""}${leaders.has(e) ? " leader" : ""}`);
-    const color = LLGDisplay.classColor(e.carClass, null);
+    const color = carColor(e);
     const r = e.isPlayer ? 15 : 12;
     g.querySelector(".ring").setAttribute("r", r + 4);
     const circle = g.children[1];
@@ -253,6 +292,7 @@ function handleStandings(payload) {
   game = payload.game || "ams2";
   standings = payload.standings || [];
   LLGDisplay.applyGameClassNames(standings, game);
+  if (rltMatcher) rltMatcher.prime(standings.map((e) => e.name));
   if (map) updateYellow(standings, Date.now());
   render();
 }
@@ -275,6 +315,11 @@ function connect() {
     }
     LLGFrameCap.handle(msg); // limite de FPS do painel
     if (msg.type === "standings") handleStandings(msg.data);
+    else if (msg.type === "rltConfig") {
+      rltConfig = msg.data || null;
+      rebuildRltMatcher();
+      render();
+    }
     else if (msg.type === "overlayCommand" && msg.name === "overlay.setOpacity" && msg.payload && msg.payload.target === "map") setMapAlpha(msg.payload.value, true);
     else if (msg.type === "trackMap") {
       setMap(msg.data);

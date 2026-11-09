@@ -90,6 +90,7 @@
     document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("on", p.dataset.cat === cat));
     store.set(`llgAjustes_${modoAjustes}`, cat);
     if (cat === "engenheiro") carregarVozes();
+    if (cat === "liga") carregarSemClasse();
     document.querySelector(".screens").scrollTop = 0;
   };
 
@@ -681,6 +682,7 @@
       try {
         const d = JSON.parse(ev.data).data || {};
         temporada = d.seasonName || d.pausedSeasonName || "";
+        carregarSemClasse();
         temporadaPausada = !!d.paused;
         // no topo: a temporada so vale numa sessao da liga (multijogador)
         const st = $("seasonState");
@@ -694,6 +696,65 @@
       } catch (_) {}
     });
   })();
+
+  // ================================================================ liga · pilotos sem classe
+  // Quem veio da temporada sem classe (ex: lineup do backup do Drive que ainda
+  // nao pontuou): um menu com as classes da temporada para cada um.
+  let semClasseBusy = false;
+
+  async function carregarSemClasse() {
+    let d;
+    try {
+      d = await api("GET", "/api/rlt/classless");
+    } catch (_) {
+      return;
+    }
+    renderSemClasse(d);
+  }
+
+  function renderSemClasse(d) {
+    const card = $("aj-semclasse");
+    const drivers = (d && d.drivers) || [];
+    card.hidden = !drivers.length || !(d.classes || []).length;
+    if (card.hidden) return;
+    const box = $("semClasseRows");
+    // nao refaz enquanto alguem esta escolhendo num menu
+    if (box.contains(document.activeElement)) return;
+    box.replaceChildren(
+      ...drivers.map((p) => {
+        const row = document.createElement("div");
+        row.className = "row";
+        const lbl = document.createElement("span");
+        lbl.className = "lbl";
+        lbl.textContent = p.displayName || p.name;
+        const sel = document.createElement("select");
+        sel.innerHTML = '<option value="">Sem classe</option>';
+        d.classes.forEach((c) => {
+          const o = document.createElement("option");
+          o.value = c.uniqueName;
+          o.textContent = c.name;
+          sel.appendChild(o);
+        });
+        sel.value = p.classUniqueName || "";
+        sel.onchange = async () => {
+          if (semClasseBusy) return;
+          semClasseBusy = true;
+          try {
+            const r = await api("POST", "/api/rlt/classless", { driver: p.name, classUniqueName: sel.value || null });
+            $("semClasseStatus").textContent = sel.value ? `${p.displayName || p.name}: ${sel.selectedOptions[0].textContent}.` : `${p.displayName || p.name}: sem classe.`;
+            sel.blur();
+            renderSemClasse(r);
+          } catch (err) {
+            $("semClasseStatus").textContent = "Não deu: " + err.message;
+          } finally {
+            semClasseBusy = false;
+          }
+        };
+        row.append(lbl, sel);
+        return row;
+      })
+    );
+  }
 
   // ================================================================ inicio
   // a categoria dos Ajustes e escolhida ao abrir, pelo modo (abrirAjustes)

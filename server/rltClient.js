@@ -13,6 +13,18 @@ const { normalizeColor } = require("../overlay/shared/colors");
 const secret = require("./secret");
 const path = require("path");
 const { createRltCache } = require("./rltCache");
+const { createBackup, isBackupId } = require("./rltBackup");
+
+// Backup do Drive (server/rltBackup.js): temporadas com seasonId "drive:<pasta>",
+// usadas quando a API nao esta disponivel. Nao gastam o limite da API.
+const BACKUP_REFRESH_MS = 5 * 60 * 1000; // releitura da pasta (standings novo)
+let backup = null;
+const getBackup = () => backup || (backup = createBackup());
+// testes: troca a fonte do backup (Drive falso)
+function setBackupSource(b) {
+  backup = b;
+}
+let backupInfo = null; // { seasonName, file, exportedAt } da temporada do backup aplicada
 
 // A chave vem do painel de controle (pedida na primeira vez que o aplicativo
 // abre e guardada criptografada no settings.json) ou, para quem desenvolve,
@@ -440,13 +452,17 @@ function collectLineupDrivers(seasonDetail) {
 function buildDrivers(standingsData, classes) {
   const list = [];
   const drivers = collectDriverStandings(standingsData);
+  // classe pelos blocos de cada classe da pontuacao: quem so esta no lineup (ainda
+  // sem pontos) entra na lista sem classe, mas aparece no bloco da classe dele
+  const classMap = collectClassStandingsMap(standingsData);
   const classByUnique = {};
   (classes || []).forEach((c) => {
     classByUnique[c.uniqueName] = c;
   });
 
   drivers.forEach((d) => {
-    const info = d.classInfo || d.ClassInfo || null;
+    const classRow = classMap.get(String(d.driverName || d.DriverName || "").toLowerCase());
+    const info = d.classInfo || d.ClassInfo || (classRow && classRow.classInfo) || null;
     const di = d.driverInfo || d.DriverInfo || {};
     const cls = info ? (classByUnique[info.uniqueName || info.UniqueName] || info) : null;
     const firstName = di.firstName || di.FirstName || null;
@@ -491,6 +507,7 @@ function buildDrivers(standingsData, classes) {
 
     list.push({
       driverId: d.driverId != null ? d.driverId : null,
+      driverName: d.driverName || d.DriverName || null,
       uniqueName: (cls && cls.uniqueName) || (info && info.uniqueName) || "—",
       name: (cls && cls.name) || (info && info.name) || "—",
       abbreviation: (cls && cls.abbreviation) || (info && info.abbreviation) || null,
@@ -671,6 +688,7 @@ function buildStandingsRows(standingsData, classes) {
 
 function clearSeason() {
   selectedSeasonId = null;
+  backupInfo = null;
   cache.seasonDetail = null;
   cache.standings = null;
   cache.classes = [];
@@ -682,10 +700,33 @@ function clearSeason() {
   return null;
 }
 
+// Temporada do backup do Drive: o mesmo caminho da API (pontuacao no formato
+// SeasonStatistics + lineup), so que dos arquivos exportados.
+async function selectBackupSeason(seasonId) {
+  const data = await getBackup().loadSeason(seasonId);
+  selectedSeasonId = seasonId;
+  backupInfo = { seasonName: data.seasonName, file: data.file, exportedAt: data.exportedAt };
+  cache.seasonDetail = null;
+  cache.classes = data.classes;
+  cache.events = data.events;
+  const standings = mergeLineupIntoStandings(data.standings, data.lineupDrivers);
+  cache.standings = standings;
+  cache.drivers = buildDrivers(standings, data.classes);
+  cache.standingsRows = buildStandingsRows(standings, data.classes);
+  startRefresh();
+  return getOverlayPayload();
+}
+
+async function listBackupSeasons() {
+  return getBackup().listSeasons();
+}
+
 async function selectSeason(seasonId) {
   if (seasonId == null || seasonId === "" || Number(seasonId) === 0) {
     return clearSeason();
   }
+  if (isBackupId(seasonId)) return selectBackupSeason(seasonId);
+  backupInfo = null;
   selectedSeasonId = Number(seasonId);
   const detail = await fetchSeasonDetail(selectedSeasonId);
   const season = detail && detail.season;
@@ -717,6 +758,16 @@ async function selectSeason(seasonId) {
 }
 
 async function refresh() {
+  // temporada do backup: rele a pasta (pode ter subido um standings novo), sem a API
+  if (isBackupId(selectedSeasonId)) {
+    try {
+      await selectBackupSeason(selectedSeasonId);
+      if (typeof onRefreshCb === "function") onRefreshCb(getOverlayPayload());
+      return getOverlayPayload();
+    } catch (_) {
+      return null;
+    }
+  }
   if (!hasKey()) return null;
   try {
     // a unica requisicao do ciclo: o que mudou no RLT desde a ultima vez.
@@ -737,10 +788,11 @@ async function refresh() {
 
 function startRefresh() {
   stopRefresh();
-  if (!hasKey()) return;
+  const fromBackup = isBackupId(selectedSeasonId);
+  if (!hasKey() && !fromBackup) return;
   refreshTimer = setInterval(() => {
     refresh().catch(() => {});
-  }, fastRefresh ? FAST_REFRESH_MS : REFRESH_MS);
+  }, fromBackup ? BACKUP_REFRESH_MS : fastRefresh ? FAST_REFRESH_MS : REFRESH_MS);
 }
 
 // Liga/desliga a releitura rapida. driverIds: pilotos do lineup sem ligacao
@@ -760,6 +812,53 @@ function setManualLinks(all) {
 
 function getManualLinks() {
   return (selectedSeasonId && manualLinksBySeason[selectedSeasonId]) || {};
+}
+
+// Classe escolhida a mao no painel para quem veio sem classe (ex: piloto do
+// lineup que ainda nao pontuou, no backup do Drive):
+//   { temporada: { "piloto do RLT": "uniqueName da classe" } }
+// So vale para quem esta sem classe; quem ja tem classe no RLT fica com a dele.
+let manualClassesBySeason = {};
+function setManualClasses(all) {
+  manualClassesBySeason = all || {};
+}
+
+function getManualClasses() {
+  return (selectedSeasonId && manualClassesBySeason[selectedSeasonId]) || {};
+}
+
+const NO_CLASS = "—";
+// Pilotos (drivers) e linhas da pontuacao com a classe manual aplicada
+function withManualClasses(list, kind) {
+  const manual = getManualClasses();
+  const classes = cache.classes || [];
+  if (!Object.keys(manual).length || !classes.length) return list;
+  return list.map((d) => {
+    const key = kind === "row" ? d.driverName : d.driverName || d.displayName;
+    const current = kind === "row" ? d.classUniqueName : d.uniqueName;
+    const want = manual[key];
+    const cls = want && current === NO_CLASS ? classes.find((c) => c.uniqueName === want) : null;
+    if (!cls) return d;
+    const color = normalizeColor(cls.color || null);
+    return kind === "row"
+      ? Object.assign({}, d, { classUniqueName: cls.uniqueName, className: cls.name || cls.uniqueName, color, manualClass: true })
+      : Object.assign({}, d, { uniqueName: cls.uniqueName, name: cls.name || cls.uniqueName, abbreviation: cls.abbreviation || null, color, manualClass: true });
+  });
+}
+
+// Para o painel: pilotos da temporada sem classe no RLT (e os que ja ganharam uma
+// a mao), com a classe escolhida, e as classes da temporada
+function classlessDrivers() {
+  const manual = getManualClasses();
+  const byName = new Map();
+  (cache.standingsRows || []).filter((r) => r.classUniqueName === NO_CLASS).forEach((r) => byName.set(r.driverName, r.displayName));
+  (cache.drivers || []).filter((d) => d.uniqueName === NO_CLASS && d.driverName).forEach((d) => byName.has(d.driverName) || byName.set(d.driverName, d.displayName));
+  return {
+    classes: (cache.classes || []).map((c) => ({ uniqueName: c.uniqueName, name: c.name || c.uniqueName, color: normalizeColor(c.color || null) })),
+    drivers: [...byName.entries()]
+      .map(([name, displayName]) => ({ name, displayName: displayName || name, classUniqueName: manual[name] || null }))
+      .sort((a, b) => String(a.displayName).localeCompare(String(b.displayName))),
+  };
 }
 
 function stopRefresh() {
@@ -786,10 +885,11 @@ function getOverlayPayload() {
     null;
   return {
     seasonId: selectedSeasonId,
-    seasonName: season && (season.fullName || season.seasonName),
+    seasonName: backupInfo ? backupInfo.seasonName : season && (season.fullName || season.seasonName),
+    source: backupInfo ? "backup" : "api",
     classes: cache.classes || [],
-    drivers: cache.drivers || [],
-    standingsRows: cache.standingsRows || [],
+    drivers: withManualClasses(cache.drivers || [], "driver"),
+    standingsRows: withManualClasses(cache.standingsRows || [], "row"),
     events: cache.events || [],
     manualLinks: getManualLinks(),
   };
@@ -799,6 +899,7 @@ function getStatus() {
   return {
     hasKey: hasKey(),
     selectedSeasonId,
+    backup: backupInfo, // temporada aplicada pelo backup do Drive (null: pela API ou nenhuma)
     classes: cache.classes.length,
     driversMapped: cache.drivers.length,
     leagueName: cache.league && cache.league.leagueInfo && cache.league.leagueInfo.leagueName,
@@ -837,6 +938,12 @@ async function syncChanges() {
 }
 
 module.exports = {
+  setBackupSource,
+  setManualClasses,
+  getManualClasses,
+  classlessDrivers,
+  isBackupId,
+  listBackupSeasons,
   cacheStatus,
   rawGet,
   syncChanges,

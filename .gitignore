@@ -17,5 +17,7 @@ Thumbs.db
 # cache das respostas da API do RLT (server/rltCache.js)
 rlt-cache.json
 rlt-cache.json.tmp
+rlt-backup.json
+rlt-backup.json.tmp
 trackmaps.json
 trackmaps.json.tmp

@@ -24,6 +24,7 @@ const ignore = [
   /^\/\.env$/,
   /^\/settings\.json$/,
   /^\/rlt-cache\.json(\.tmp)?$/,
+  /^\/rlt-backup\.json(\.tmp)?$/,
   /^\/trackmaps\.json(\.tmp)?$/,
   /^\/server\/rlt-key\.enc$/,
   /^\/drivers-config_bak\.js$/,

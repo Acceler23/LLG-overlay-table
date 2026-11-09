@@ -1626,24 +1626,41 @@ function standingsRowsToShow(standings) {
   });
 }
 
+// Ordem da tela de pontuacao. Na corrida, a ordem e a da pista (posicao ao
+// vivo, na classe quando a pagina e por classe), e o numero da linha e essa
+// posicao; quem pontuou no campeonato mas nao esta nesta corrida vai para o
+// fim, sem numero. Fora da corrida, a ordem do campeonato.
+function standingsOrder(list, classMode, standings) {
+  const champ = (r) => (classMode ? classStandingPos(r) : r.position || 999);
+  const live = isRaceSession() && standings && standings.length ? liveRacePosByDriver(standings, classMode) : null;
+  const racePos = new Map(list.map((r) => [r, live ? lookupLivePos(r, live) : null]));
+  return list
+    .slice()
+    .sort((a, b) => {
+      const pa = racePos.get(a);
+      const pb = racePos.get(b);
+      if (live && (pa != null || pb != null)) {
+        if (pa == null) return 1;
+        if (pb == null) return -1;
+        if (pa !== pb) return pa - pb;
+      }
+      return champ(a) - champ(b);
+    })
+    .map((r) => ({ row: r, position: live ? (racePos.get(r) != null ? racePos.get(r) : "–") : champ(r) }));
+}
+
 function buildStandingsDisplayList(standings) {
   const rows = standingsRowsToShow(standings);
   if (!rows.length) return [];
   const mode = currentPageMode(standings);
 
   function asItems(list, classMode) {
-    const ordered = list
-      .slice()
-      .sort((a, b) => {
-        if (classMode) return classStandingPos(a) - classStandingPos(b);
-        return (a.position || 999) - (b.position || 999);
-      })
-      .map((r) => ({
-        type: "row",
-        row: r,
-        displayPosition: classMode ? classStandingPos(r) : r.position,
-        classMode: !!classMode,
-      }));
+    const ordered = standingsOrder(list, classMode, standings).map((o) => ({
+      type: "row",
+      row: o.row,
+      displayPosition: o.position,
+      classMode: !!classMode,
+    }));
     return paginateFixedTop(ordered);
   }
 
@@ -1663,10 +1680,12 @@ function buildStandingsDisplayList(standings) {
       classKeys,
       groups,
       (list) =>
-        list
-          .slice()
-          .sort((a, b) => classStandingPos(a) - classStandingPos(b))
-          .map((r, i) => ({ type: "row", row: r, displayPosition: i + 1, classMode: true })),
+        isRaceSession()
+          ? standingsOrder(list, true, standings).map((o) => ({ type: "row", row: o.row, displayPosition: o.position, classMode: true }))
+          : list
+              .slice()
+              .sort((a, b) => classStandingPos(a) - classStandingPos(b))
+              .map((r, i) => ({ type: "row", row: r, displayPosition: i + 1, classMode: true })),
       (k) => ({ type: "header", label: k, title: groups[k][0].className || k, color: groups[k][0].color })
     );
   }

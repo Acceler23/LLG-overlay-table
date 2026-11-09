@@ -846,7 +846,8 @@ function renderSeasons(seasons) {
     const opt = document.createElement("option");
     opt.value = s.seasonId;
     const n = s.classes ? s.classes.length : 0;
-    opt.textContent = `${s.seasonName} (${n} classes)`;
+    // temporada do backup do Drive (sem a API): o servidor nao sabe as classes antes de abrir
+    opt.textContent = s.backup ? `${s.seasonName} (backup)` : `${s.seasonName} (${n} classes)`;
     sel.appendChild(opt);
   });
   if (cur) sel.value = cur;
@@ -889,6 +890,7 @@ async function reloadSeasons() {
     log("Recarregando seasons…");
     const body = await api("/api/rlt/seasons");
     log(`Seasons: ${(body.seasons || []).length}`);
+    if (body.apiError) log("API do RLT indisponível: " + body.apiError + " (as temporadas do backup continuam valendo)");
     renderSeasons(body.seasons || []);
   } catch (e) {
     log("ERRO seasons: " + e.message);
@@ -970,7 +972,8 @@ async function applySeason() {
     log(`Aplicando season ${seasonId}…`);
     const body = await api("/api/rlt/season", {
       method: "POST",
-      body: JSON.stringify({ seasonId: Number(seasonId) }),
+      // temporada do backup do Drive: o id e "drive:<pasta>", nao um numero
+      body: JSON.stringify({ seasonId: /^drive:/.test(seasonId) ? seasonId : Number(seasonId) }),
     });
     const p = body.payload || {};
     const nDrivers = Array.isArray(p.drivers) ? p.drivers.length : Object.keys(p.drivers || {}).length;
@@ -1083,11 +1086,10 @@ async function refreshStatus() {
       skipped = localStorage.getItem("skipFirstRun") === "1";
     } catch (_) {}
     showFirstRun(!body.hasKey && !skipped);
-    if (body.hasKey) {
-      await reloadSeasons();
-      // a temporada aplicada (inclusive a reaplicada ao abrir) aparece selecionada
-      if (body.selectedSeasonId) document.getElementById("rltSeason").value = String(body.selectedSeasonId);
-    }
+    // com ou sem chave: as temporadas do backup do Drive funcionam sem a API
+    await reloadSeasons();
+    // a temporada aplicada (inclusive a reaplicada ao abrir) aparece selecionada
+    if (body.selectedSeasonId) document.getElementById("rltSeason").value = String(body.selectedSeasonId);
   } catch (_) {}
   loadAssetsBase();
 }
