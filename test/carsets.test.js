@@ -47,7 +47,7 @@ test("lista de carsets e link do Drive", () => {
     { Season: "Sem link", CarSet: "" },
     { Season: "Http puro", CarSet: "http://exemplo.com/a.zip" },
   ]);
-  assert.deepEqual(list, [{ season: "Stock - T2", link: "https://drive.google.com/file/d/ABC_123-x/view?usp=sharing" }]);
+  assert.deepEqual(list, [{ season: "Stock - T2", link: "https://drive.google.com/file/d/ABC_123-x/view?usp=sharing", update: null }]); // sem "Update" na lista
   assert.equal(carsets.downloadUrl(list[0].link), "https://drive.usercontent.google.com/download?id=ABC_123-x&export=download&confirm=t");
   assert.equal(carsets.downloadUrl("https://drive.google.com/open?id=XYZ"), "https://drive.usercontent.google.com/download?id=XYZ&export=download&confirm=t");
   assert.equal(carsets.downloadUrl("https://exemplo.com/carset.zip"), "https://exemplo.com/carset.zip");

@@ -190,6 +190,13 @@ button.bigrow:hover { border-color: var(--accent); }
 .bigrow .name { flex: 1; min-width: 0; }
 .bigrow .name .t { display: block; font-size: 21px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; }
 .bigrow .name .s { display: block; font-size: 14px; color: var(--muted); font-weight: 600; margin-top: 2px; }
+/* pinturas: o botao de ligar e, ao lado, atualizar e apagar */
+.carset-item { display: flex; align-items: stretch; gap: 10px; }
+.carset-item > .bigrow { flex: 1; min-width: 0; }
+.carset-actions { display: flex; flex-direction: column; justify-content: center; gap: 8px; flex: none; }
+.carset-actions .btn { min-width: 120px; }
+.carset-actions .btn.update { border-color: var(--warn); color: var(--warn); }
+.bigrow .s.update { color: var(--warn); }
 .bigrow .tag { font-size: 15px; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; padding: 10px 16px; border-radius: 12px; white-space: nowrap; }
 .bigrow.ok { border-color: #00a578; }
 .bigrow.ok .tag { color: var(--ok); }

@@ -130,3 +130,21 @@ test("sem internet: vale a ultima copia guardada", async () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("copia guardada: a exportacao antiga sai quando chega uma nova", async () => {
+  const { dir, files, backup } = setup();
+  try {
+    const newer = files.folders.SEASON1.find((it) => it.id === "NEW");
+    files.folders.SEASON1 = files.folders.SEASON1.filter((it) => it.id !== "NEW"); // so a antiga
+    await backup.loadSeason("drive:SEASON1");
+    const stored = () => JSON.parse(fs.readFileSync(path.join(dir, "rlt-backup.json"), "utf8"));
+    assert.ok(stored()["file:OLD"], "a antiga e a que vale agora");
+    files.folders.SEASON1.push(newer); // subiu uma exportacao nova
+    const s = await backup.loadSeason("drive:SEASON1");
+    assert.equal(s.standings.seasonStatistics.driverStandings[0].points, "50");
+    assert.equal(stored()["file:OLD"], undefined, "a antiga saiu");
+    assert.ok(stored()["file:NEW"]);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

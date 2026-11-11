@@ -439,6 +439,8 @@
     // baixou e ligou em segundo plano: o resultado vem no status
     if (esperandoDownload && !st.running && st.season === esperandoDownload) {
       if (st.phase === "done" && st.result && st.result.report) avisoCarset = textoRelatorio(st.season, st.result.report);
+      else if (st.phase === "done") avisoCarset = `${st.season}: atualizado.`;
+      if (st.phase === "done") delete verificacao[st.season]; // baixou de novo: o resultado da busca nao vale mais
       esperandoDownload = null;
     }
     const base = !d.gameFound
@@ -459,17 +461,59 @@
         const row = document.createElement("button");
         row.className = "bigrow" + (it.active ? " on" : "") + (baixando ? " busy" : "");
         row.disabled = baixando || !d.gameFound;
+        const busca = verificacao[it.season]; // resultado de "Procurar atualizações"
+        const situacao = !it.downloaded
+          ? ""
+          : busca === "update"
+            ? " · nova versão na lista da liga"
+            : busca === "ok"
+              ? " · em dia"
+              : busca === "unknown"
+                ? " · baixado antes do registro de versão: atualize para conferir"
+                : busca === "error"
+                  ? " · não deu para conferir agora"
+                  : "";
+        // data da versao (aaaammdd da lista da liga): a baixada, ou a da lista
+        const dataVersao = (n) => (n ? `${String(n).slice(6, 8)}/${String(n).slice(4, 6)}/${String(n).slice(0, 4)}` : "");
+        const versao = it.downloaded ? dataVersao(it.downloadedUpdate) : dataVersao(it.listUpdate);
         const sub = baixando
           ? `${{ downloading: "Baixando", extracting: "Extraindo", installing: "Instalando" }[st.phase] || "Preparando"}… ${st.percent ? st.percent + "%" : ""}`
           : it.downloaded
-            ? `${it.liveries} pinturas · ${it.cars} ${it.cars === 1 ? "carro" : "carros"}`
-            : "Ainda não baixado: ligar baixa e instala";
+            ? `${it.liveries} pinturas · ${it.cars} ${it.cars === 1 ? "carro" : "carros"}${versao ? ` · versão de ${versao}` : ""}${situacao}`
+            : `Ainda não baixado: ligar baixa e instala${versao ? ` · versão de ${versao}` : ""}`;
         row.innerHTML = `<span class="name"><span class="t"></span><span class="s"></span>${baixando ? '<div class="bar"><i></i></div>' : ""}</span><span class="toggle"><i></i></span>`;
         row.querySelector(".t").textContent = it.season;
         row.querySelector(".s").textContent = sub;
+        row.querySelector(".s").classList.toggle("update", busca === "update");
         if (baixando) row.querySelector(".bar i").style.width = `${st.percent || 5}%`;
         row.onclick = () => alternarCarset(it.season, !it.active);
-        return row;
+
+        // ao lado: atualizar (baixa de novo da lista da liga) e apagar
+        const item = document.createElement("div");
+        item.className = "carset-item";
+        item.appendChild(row);
+        if (it.downloaded) {
+          const acoes = document.createElement("div");
+          acoes.className = "carset-actions";
+          if (it.inList !== false) {
+            const up = document.createElement("button");
+            up.className = "btn" + (busca === "update" || busca === "unknown" ? " update" : "");
+            up.textContent = "Atualizar";
+            up.title = "Baixa de novo o carset da lista da liga (se estava ligado, liga de novo)";
+            up.disabled = !!st.running || !d.gameFound;
+            up.onclick = () => atualizarCarset(it.season);
+            acoes.appendChild(up);
+          }
+          const del = document.createElement("button");
+          del.className = "btn danger";
+          del.textContent = "Apagar";
+          del.title = "Tira do jogo e apaga do aplicativo (dá para baixar de novo)";
+          del.disabled = !!st.running;
+          del.onclick = () => apagarCarset(it.season, it.active);
+          acoes.appendChild(del);
+          item.appendChild(acoes);
+        }
+        return item;
       })
     );
     if (st.phase === "error" && st.error && st.season) $("carsetNote").textContent = `${st.season}: ${st.error}`;
@@ -477,6 +521,64 @@
     clearTimeout(carsetPoll);
     if (st.running && tela === "pinturas") carsetPoll = setTimeout(carregarPinturas, 1000);
     else if (esperandoDownload && tela === "pinturas") carsetPoll = setTimeout(carregarPinturas, 1000); // o status ainda nao virou "baixando"
+  }
+
+  // Procurar atualizações: o servidor compara cada carset baixado com o arquivo da
+  // lista da liga (tamanho, data e nome no Drive), sem baixar
+  const verificacao = {}; // temporada -> "ok" | "update" | "unknown" | "error"
+  window.procurarAtualizacoes = async function () {
+    const btn = $("carsetCheckBtn");
+    btn.disabled = true;
+    $("carsetCheckStatus").textContent = "Procurando…";
+    try {
+      const r = await api("POST", "/api/carsets/check", {});
+      Object.keys(verificacao).forEach((k) => delete verificacao[k]);
+      Object.assign(verificacao, r.results || {});
+      const v = Object.values(verificacao);
+      const novas = v.filter((x) => x === "update").length;
+      const semRegistro = v.filter((x) => x === "unknown").length;
+      $("carsetCheckStatus").textContent = !v.length
+        ? "Nenhum carset baixado para conferir."
+        : novas
+          ? `${novas === 1 ? "1 carset tem" : novas + " carsets têm"} versão nova: use Atualizar.`
+          : semRegistro
+            ? "Nenhuma versão nova conhecida. Os marcados foram baixados antes do registro de versão: atualize uma vez para as próximas buscas conferirem."
+            : "Tudo em dia.";
+    } catch (err) {
+      $("carsetCheckStatus").textContent = "Não deu: " + err.message;
+    } finally {
+      btn.disabled = false;
+    }
+    carregarPinturas();
+  };
+
+  async function atualizarCarset(season) {
+    avisoCarset = "";
+    try {
+      const r = await api("POST", "/api/carsets/update", { season });
+      if (r.downloading) esperandoDownload = season;
+    } catch (err) {
+      avisoCarset = "Não deu: " + err.message;
+    }
+    carregarPinturas();
+  }
+
+  async function apagarCarset(season, ativo) {
+    const ok = confirm(
+      `Apagar o carset "${season}"?\n\n` +
+        (ativo ? "As pinturas dele saem do jogo e os arquivos" : "Os arquivos") +
+        " dele são apagados do LLG Overlay. As suas pinturas não são tocadas, e dá para baixar de novo depois."
+    );
+    if (!ok) return;
+    avisoCarset = "";
+    try {
+      await api("POST", "/api/carsets/delete", { season, confirm: true });
+      delete verificacao[season];
+      avisoCarset = `${season}: apagado.`;
+    } catch (err) {
+      avisoCarset = "Não deu: " + err.message;
+    }
+    carregarPinturas();
   }
 
   async function alternarCarset(season, on) {

@@ -113,8 +113,23 @@
     <!-- ============================================================ PINTURAS -->
     <section class="screen" data-screen="pinturas" data-title="Pinturas">
       <p class="hint">Liga as pinturas da temporada no Automobilista 2. As suas pinturas não são tocadas, e desligar tira só as da liga. <b>Vale quando o jogo carregar de novo.</b></p>
+      <div class="row wrap">
+        <button class="btn primary" id="carsetCheckBtn" onclick="procurarAtualizacoes()">Procurar atualizações</button>
+        <span class="muted" id="carsetCheckStatus"></span>
+      </div>
       <div class="rows" id="carsetRows"><div class="muted">Carregando…</div></div>
       <p class="note" id="carsetNote"></p>
+
+      <!-- pinturas que versoes antigas do LLG Overlay deixaram com "_old_" no nome (logica no panel.js) -->
+      <div class="card" id="aj-old" style="margin-top:22px">
+        <h3>Pinturas antigas (_old_)</h3>
+        <p class="lead">Versões antigas do LLG Overlay guardavam as pinturas trocadas com "_old_" no nome. Aqui dá para apagá-las e liberar espaço. Não pode ser desfeito.</p>
+        <div class="row wrap">
+          <button class="btn" onclick="checkOldLiveries()">Verificar</button>
+          <button id="oldDeleteBtn" class="btn danger" onclick="deleteOldLiveries()" disabled>Apagar pinturas antigas</button>
+        </div>
+        <div class="muted" id="oldStatus"></div>
+      </div>
     </section>
 
     <!-- ============================================================ TRANSMITIR -->
@@ -217,16 +232,6 @@
               <p class="lead" style="margin-top:16px">Em outro monitor, no celular ou no OBS:</p>
               <div class="row"><span class="lbl">Tabela</span><input id="linkDriver" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkDriver')">Copiar</button></div>
               <div class="row"><span class="lbl">Telemetria</span><input id="linkTelemetria" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkTelemetria')">Copiar</button></div>
-            </div>
-
-            <div class="card" id="aj-old">
-              <h3>Pinturas antigas (_old_)</h3>
-              <p class="lead">Versões antigas do LLG Overlay guardavam as pinturas trocadas com "_old_" no nome. Aqui dá para apagá-las e liberar espaço. Não pode ser desfeito.</p>
-              <div class="row wrap">
-                <button class="btn" onclick="checkOldLiveries()">Verificar</button>
-                <button id="oldDeleteBtn" class="btn danger" onclick="deleteOldLiveries()" disabled>Apagar pinturas antigas</button>
-              </div>
-              <div class="muted" id="oldStatus"></div>
             </div>
 
             <!-- controles do painel antigo que o panel.js ainda preenche: ficam escondidos -->

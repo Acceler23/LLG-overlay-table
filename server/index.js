@@ -702,8 +702,10 @@ app.get("/api/carsets/library", async (req, res) => {
     const [overrides, gameRunning] = await Promise.all([carsetOverrides(), carsets.isGameRunning()]);
     let seasons = [];
     let listError = null;
+    let listItems = [];
     try {
-      seasons = (await fetchCarsetList()).map((x) => x.season);
+      listItems = await fetchCarsetList();
+      seasons = listItems.map((x) => x.season);
     } catch (e) {
       listError = e.message;
     }
@@ -711,7 +713,15 @@ app.get("/api/carsets/library", async (req, res) => {
     const byName = new Map(lib.map((c) => [c.name, c]));
     // temporadas da lista da liga (baixadas ou nao) e, depois, o que so existe na biblioteca
     const items = seasons.map((season) => Object.assign({ season, downloaded: byName.has(season), active: false, cars: 0, liveries: 0 }, byName.has(season) ? byName.get(season) : {}));
-    lib.filter((c) => !seasons.includes(c.name)).forEach((c) => items.push(Object.assign({ season: c.name, downloaded: true }, c)));
+    lib.filter((c) => !seasons.includes(c.name)).forEach((c) => items.push(Object.assign({ season: c.name, downloaded: true, inList: false }, c)));
+    // quando foi baixado (o resultado da ultima busca de atualizacao fica no painel)
+    items.forEach((it) => {
+      const src = it.downloaded ? carsetLibrary.getSource(it.season) : null;
+      it.downloadedAt = (src && src.downloadedAt) || null;
+      it.downloadedUpdate = (src && src.update) || null; // versao baixada (aaaammdd)
+      const li = listItems.find((x) => x.season === it.season);
+      it.listUpdate = (li && li.update) || null; // versao na lista da liga
+    });
     res.json({ ok: true, gameFound: !!overrides, gameRunning, items, listError, status: carsets.status() });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -739,11 +749,73 @@ app.post("/api/carsets/toggle", async (req, res) => {
     // ainda nao baixado: baixa, guarda e liga, em segundo plano (o painel acompanha por /api/carsets/status)
     const item = (await fetchCarsetList()).find((x) => x.season === season);
     if (!item) return res.status(404).json({ ok: false, error: "Temporada sem carset na lista." });
-    carsets.fetchToLibrary({ link: item.link, season, library: carsetLibrary, overrides, activate: true }).then(
+    carsets.fetchToLibrary({ link: item.link, update: item.update, season, library: carsetLibrary, overrides, activate: true }).then(
       (r) => console.log(`Carset "${season}" baixado e ligado: ${r.report ? r.report.applied : 0} pinturas`),
       (err) => console.log(`Carset "${season}": ${err.message}`)
     );
     res.json({ ok: true, downloading: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Procurar atualizacoes: compara cada carset baixado com o arquivo da lista da
+// liga (tamanho, data e nome do arquivo no Drive, sem baixar).
+//   { season: "ok" | "update" (arquivo mudou) | "unknown" (baixado antes de existir o registro) | "error" }
+app.post("/api/carsets/check", async (req, res) => {
+  try {
+    const list = await fetchCarsetList();
+    const out = {};
+    for (const item of list) {
+      if (!carsetLibrary.has(item.season)) continue;
+      // a data da lista ("Update") e o arquivo no Drive; sem ler o Drive, so a data
+      let remote = null;
+      try {
+        remote = await carsets.remoteInfo(item.link);
+      } catch (e) {
+        console.log(`Carset "${item.season}": nao deu para ler o arquivo no Drive (${e.message})`);
+      }
+      const status = carsets.updateStatus(carsetLibrary.getSource(item.season), item, remote, carsetLibrary.downloadedDay(item.season));
+      out[item.season] = !remote && status === "unknown" ? "error" : status;
+    }
+    res.json({ ok: true, results: out });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: err.message });
+  }
+});
+
+// Atualizar: baixa de novo o carset da lista e, se estava ligado, liga de novo
+app.post("/api/carsets/update", async (req, res) => {
+  try {
+    const season = String((req.body && req.body.season) || "");
+    if (!season) return res.status(400).json({ ok: false, error: "Falta a temporada." });
+    if (carsets.status().running) return res.status(409).json({ ok: false, error: "Ja ha um carset sendo baixado." });
+    const overrides = await carsetOverrides();
+    if (!overrides) return res.status(404).json({ ok: false, error: "Automobilista 2 nao encontrado nas bibliotecas da Steam." });
+    const item = (await fetchCarsetList()).find((x) => x.season === season);
+    if (!item) return res.status(404).json({ ok: false, error: "Temporada sem carset na lista." });
+    const wasActive = carsetLibrary.isActive(season, overrides);
+    carsets.fetchToLibrary({ link: item.link, update: item.update, season, library: carsetLibrary, overrides, activate: wasActive }).then(
+      () => console.log(`Carset "${season}" atualizado${wasActive ? " e ligado de novo" : ""}`),
+      (err) => console.log(`Carset "${season}": ${err.message}`)
+    );
+    res.json({ ok: true, downloading: true, reactivate: wasActive });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Apagar: tira do jogo e da biblioteca do aplicativo (o painel pede confirmacao)
+app.post("/api/carsets/delete", async (req, res) => {
+  try {
+    const season = String((req.body && req.body.season) || "");
+    if (!season) return res.status(400).json({ ok: false, error: "Falta a temporada." });
+    if (!(req.body && req.body.confirm === true)) return res.status(400).json({ ok: false, error: "Falta confirmar." });
+    if (carsets.status().running) return res.status(409).json({ ok: false, error: "Ha um carset sendo baixado." });
+    const overrides = await carsetOverrides();
+    const removed = carsetLibrary.remove(season, overrides);
+    console.log(`Carset "${season}" apagado`);
+    res.json({ ok: true, removed });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }

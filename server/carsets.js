@@ -34,8 +34,34 @@ function parseList(json) {
     .map((item) => ({
       season: String((item && (item.Season || item.season)) || "").trim(),
       link: String((item && (item.CarSet || item.Carset || item.carset || item.link)) || "").trim(),
+      // data da versao do carset na lista (aaaammdd, ex: 20261109); null sem data
+      update: updateDate(item && (item.Update != null ? item.Update : item.update)),
     }))
     .filter((item) => item.season && /^https:\/\//i.test(item.link));
+}
+
+// "Update" da lista: aaaammdd (numero ou texto). Devolve o numero, ou null.
+function updateDate(v) {
+  const m = /^(\d{4})(\d{2})(\d{2})$/.exec(String(v == null ? "" : v).trim());
+  return m && Number(m[2]) >= 1 && Number(m[2]) <= 12 && Number(m[3]) >= 1 && Number(m[3]) <= 31 ? Number(m[0]) : null;
+}
+
+// Tem versao nova? Compara o que foi baixado (saved: o registro do download, ou
+// null para os baixados antes dele existir) com o item da lista e com o arquivo
+// no Drive (remote, de remoteInfo; null se nao deu para ler).
+//   downloadedDay: dia (aaaammdd) em que a pasta foi criada na biblioteca, para os sem registro
+// -> "update" | "ok" | "unknown"
+function updateStatus(saved, item, remote, downloadedDay) {
+  if (saved) {
+    if (item.update && saved.update && item.update > saved.update) return "update";
+    if (item.update && !saved.update && downloadedDay && downloadedDay < item.update) return "update";
+    const same = sameSource(saved, remote);
+    if (same === false) return "update";
+    return "ok";
+  }
+  // baixado antes do registro: so a data da lista contra o dia do download
+  if (item.update && downloadedDay) return downloadedDay >= item.update ? "ok" : "update";
+  return "unknown";
 }
 
 // Link de compartilhamento do Google Drive -> link de download direto.
@@ -346,6 +372,41 @@ async function install(options) {
 // Baixa o carset da temporada para a biblioteca (server/carsetLibrary.js) e, com
 // activate, ja liga no jogo. Usa o mesmo trabalho em andamento (status) que install.
 // options: { link, season, library, overrides, activate }
+// "Impressao digital" do arquivo do carset no Drive, sem baixar: pede so o
+// primeiro byte e le o tamanho total, a data de modificacao e o nome. Se o
+// organizador trocar o arquivo (mesmo mantendo o link), isso muda.
+async function remoteInfo(link) {
+  const url = downloadUrl(link);
+  if (!url) throw new Error("Link do carset invalido.");
+  const res = await fetch(url, { redirect: "follow", headers: { Range: "bytes=0-0" } });
+  try {
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (/text\/html/i.test(String(res.headers.get("content-type") || ""))) throw new Error("o Google Drive nao liberou o arquivo");
+    const range = /\/(\d+)$/.exec(String(res.headers.get("content-range") || ""));
+    const disp = /filename="?([^";]+)"?/i.exec(String(res.headers.get("content-disposition") || ""));
+    return {
+      link,
+      size: range ? Number(range[1]) : Number(res.headers.get("content-length")) || null,
+      lastModified: res.headers.get("last-modified") || null,
+      filename: disp ? disp[1] : null,
+    };
+  } finally {
+    try {
+      await res.body.cancel();
+    } catch (_) {}
+  }
+}
+
+// O carset baixado e o da lista sao o mesmo arquivo? (sem registro: nao da para saber)
+function sameSource(saved, remote) {
+  if (!saved || !remote) return null;
+  if (saved.link !== remote.link) return false;
+  if (saved.size != null && remote.size != null && saved.size !== remote.size) return false;
+  if (saved.lastModified && remote.lastModified && saved.lastModified !== remote.lastModified) return false;
+  if (saved.filename && remote.filename && saved.filename !== remote.filename) return false;
+  return true;
+}
+
 async function fetchToLibrary(options) {
   if (job.running) throw new Error("Ja ha um carset sendo baixado.");
   const url = downloadUrl(options.link);
@@ -364,6 +425,12 @@ async function fetchToLibrary(options) {
     await extract(file, dir);
     job.phase = "installing";
     const info = options.library.importDir(dir, options.season, options.overrides);
+    // de onde veio (para procurar atualizacao depois); sem a impressao digital, so o link
+    let source = { link: options.link };
+    try {
+      source = await remoteInfo(options.link);
+    } catch (_) {}
+    if (options.library.setSource) options.library.setSource(options.season, Object.assign(source, { update: options.update || null, downloadedAt: new Date().toISOString() }));
     const report = options.activate ? options.library.activate(options.season, options.overrides) : null;
     job = { running: false, phase: "done", percent: 100, season: options.season, result: { library: info, report }, error: null };
     return job.result;
@@ -375,4 +442,4 @@ async function fetchToLibrary(options) {
   }
 }
 
-module.exports = { fetchToLibrary, listOld, deleteOld, LIST_FILE, MODES, OLD_PREFIX, parseList, downloadUrl, overridesDir, findCarDirs, applyCar, installExtracted, archiveKind, isGameRunning, install, status };
+module.exports = { remoteInfo, sameSource, updateDate, updateStatus, fetchToLibrary, listOld, deleteOld, LIST_FILE, MODES, OLD_PREFIX, parseList, downloadUrl, overridesDir, findCarDirs, applyCar, installExtracted, archiveKind, isGameRunning, install, status };

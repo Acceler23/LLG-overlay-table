@@ -430,7 +430,49 @@ function createLibrary(libDir) {
     }
   }
 
-  return { list, has, info, importDir, activate, deactivate, isActive };
+  // De onde o carset foi baixado: { link, size, lastModified, filename, downloadedAt }.
+  // Fica num arquivo dentro da pasta do carset; serve para procurar atualizacao.
+  const SOURCE_FILE = ".llg-source.json";
+  function getSource(name) {
+    try {
+      return JSON.parse(fs.readFileSync(path.join(libDir, name, SOURCE_FILE), "utf8"));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function setSource(name, source) {
+    try {
+      fs.writeFileSync(path.join(libDir, name, SOURCE_FILE), JSON.stringify(source, null, 2));
+    } catch (_) {}
+  }
+
+  // Apaga o carset: tira do jogo (desliga) e da biblioteca. Pode ser baixado de novo.
+  function remove(name, overrides) {
+    const dir = path.join(libDir, name);
+    // so uma pasta logo abaixo da biblioteca (nome com ".." ou barra nao sai dela)
+    const rel = path.relative(libDir, dir);
+    if (!rel || rel.startsWith("..") || path.isAbsolute(rel) || /[\\/]/.test(rel)) throw new Error("Nome de carset invalido.");
+    deactivate(name, overrides);
+    if (!fs.existsSync(dir)) return false;
+    fs.rmSync(dir, { recursive: true, force: true });
+    return true;
+  }
+
+  // Dia (aaaammdd) em que o carset entrou na biblioteca: para os baixados antes do
+  // registro de versao (.llg-source.json), que nao sabem a data da versao
+  function downloadedDay(name) {
+    try {
+      const st = fs.statSync(path.join(libDir, name));
+      const t = Math.min(...[st.birthtimeMs, st.mtimeMs].filter((x) => x > 0));
+      const d = new Date(t);
+      return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  return { list, has, info, importDir, activate, deactivate, isActive, getSource, setSource, remove, downloadedDay };
 }
 
 module.exports = { createLibrary, slug, attr, blocks, elements, liveriesOf, removeRegion, TAG };

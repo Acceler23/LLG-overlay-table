@@ -726,17 +726,18 @@ async function selectSeason(seasonId) {
     return clearSeason();
   }
   if (isBackupId(seasonId)) return selectBackupSeason(seasonId);
-  backupInfo = null;
-  selectedSeasonId = Number(seasonId);
-  const detail = await fetchSeasonDetail(selectedSeasonId);
+  // Tudo e buscado antes de trocar a temporada: se a API falhar (chave vencida,
+  // sem internet), a temporada que estava aplicada continua inteira, em vez de
+  // ficar com o id da nova e os dados da anterior.
+  const id = Number(seasonId);
+  const detail = await fetchSeasonDetail(id);
   const season = detail && detail.season;
   const classes = (season && season.multiclass && season.multiclass.classes) || [];
-  cache.classes = classes;
-  cache.events = await fetchEventDetails(seasonEvents(season));
+  const events = await fetchEventDetails(seasonEvents(season));
 
   let standings = null;
   try {
-    standings = await fetchStandings(selectedSeasonId);
+    standings = await fetchStandings(id);
   } catch (_) {
     standings = null;
   }
@@ -744,15 +745,23 @@ async function selectSeason(seasonId) {
   // pontuacao, entao vem daqui (com classe e equipe).
   let lineups = null;
   try {
-    lineups = await fetchLineups(selectedSeasonId);
+    lineups = await fetchLineups(id);
   } catch (_) {
     lineups = null;
   }
   // nome no jogo de cada um, que o RLT so da no perfil do piloto
   const lineupDrivers = (await attachInGameNames(lineupSeatsToDrivers(lineups))).concat(collectLineupDrivers(detail));
   standings = mergeLineupIntoStandings(standings, lineupDrivers);
-  cache.drivers = buildDrivers(standings, classes);
-  cache.standingsRows = buildStandingsRows(standings, classes);
+  const drivers = buildDrivers(standings, classes);
+  const rows = buildStandingsRows(standings, classes);
+  // agora sim: troca a temporada de uma vez
+  backupInfo = null;
+  selectedSeasonId = id;
+  cache.seasonDetail = detail;
+  cache.classes = classes;
+  cache.events = events;
+  cache.drivers = drivers;
+  cache.standingsRows = rows;
   startRefresh();
   return getOverlayPayload();
 }

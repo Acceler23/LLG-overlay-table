@@ -51,3 +51,23 @@ test("piloto sem classe: aparece para o painel e ganha a classe escolhida a mao"
     rlt.setBackupSource(null);
   }
 });
+
+test("trocar para uma temporada da API que falha nao estraga a que estava aplicada", async () => {
+  rlt.setBackupSource(fakeBackup);
+  const savedKey = rlt.getApiKey();
+  rlt.setApiKey(""); // sem chave: a busca falha na hora, sem ir a internet
+  try {
+    await rlt.selectSeason("drive:S1");
+    await assert.rejects(rlt.selectSeason(40), /API key ausente/);
+    const p = rlt.getOverlayPayload();
+    assert.equal(p.seasonId, "drive:S1");
+    assert.equal(p.seasonName, "Copa");
+    assert.equal(p.source, "backup");
+  } finally {
+    rlt.clearSeason();
+    rlt.stopRefresh();
+    rlt.setBackupSource(null);
+    rlt.setApiKey(savedKey);
+    rlt.stopRefresh();
+  }
+});

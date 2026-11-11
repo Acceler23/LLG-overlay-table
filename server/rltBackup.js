@@ -173,14 +173,20 @@ function createBackup(opts = {}) {
 
   const rootId = () => folderIdFromLink(opts.link || secret.decrypt(FOLDER_LINK));
 
+  // guarda so o que mudou (o arquivo inteiro e regravado a cada vez)
+  function keep(key, value) {
+    if (store[key] !== undefined && JSON.stringify(store[key]) === JSON.stringify(value)) return;
+    store[key] = value;
+    save();
+  }
+
   // Lista de uma pasta; sem rede, a ultima guardada
   async function folder(id) {
     const key = `folder:${id}`;
     try {
       const items = parseFolderPage(await fetchText(`https://drive.google.com/drive/folders/${id}`));
       if (!items.length) throw new Error("pasta vazia ou sem acesso");
-      store[key] = items;
-      save();
+      keep(key, items);
       return items;
     } catch (err) {
       if (store[key]) return store[key];
@@ -193,8 +199,7 @@ function createBackup(opts = {}) {
     const key = `file:${fileId}`;
     try {
       const data = JSON.parse(await fetchText(`https://drive.google.com/uc?export=download&id=${fileId}`));
-      store[key] = data;
-      save();
+      keep(key, data);
       return data;
     } catch (err) {
       if (store[key] !== undefined) return store[key];
@@ -218,6 +223,18 @@ function createBackup(opts = {}) {
     const items = await folder(folderId);
     const standingsFile = newestStandings(items);
     if (!standingsFile) throw new Error("Backup do Drive: a pasta da temporada nao tem o arquivo de standings");
+    // as exportacoes antigas desta temporada nao servem mais: saem da copia guardada
+    // (cada uma tem ~1 MB; sem isso o rlt-backup.json so cresceria)
+    let pruned = false;
+    items
+      .filter((it) => !isFolder(it) && /standings.*\.json$/i.test(it.name) && it.id !== standingsFile.id)
+      .forEach((it) => {
+        if (store[`file:${it.id}`] !== undefined) {
+          delete store[`file:${it.id}`];
+          pruned = true;
+        }
+      });
+    if (pruned) save();
     const lineupsFile = findFile(items, /^lineups\.json$/i);
     const driversFile = findFile(root, /^drivers\.json$/i);
     const teamsFile = findFile(root, /^teams\.json$/i);

@@ -658,6 +658,13 @@ function connect() {
     } else if (msg.type === "hello") {
       checkBuildId(msg.buildId);
     } else if (msg.type === "overlayCommand") {
+      // tecla que esta janela ja tratou sozinha: o atalho global (hotkeys.ps1) pega a
+      // mesma tecla e o comando chega de novo logo depois; aplicar de novo pularia
+      // duas colunas, ou ligaria e desligaria a pontuacao na hora
+      if (Date.now() - (localKeyAt[msg.name] || 0) < LOCAL_KEY_ECHO_MS) {
+        localKeyAt[msg.name] = 0;
+        return;
+      }
       applyOverlayCommand(msg.name, msg.payload || {});
     } else if (msg.type === "rltConfig") {
       rltConfig = msg.data || null;
@@ -2471,22 +2478,27 @@ function formatTime(ms) {
   return `${m}:${String(s).padStart(2, "0")}.${String(millis).padStart(3, "0")}`;
 }
 
+// Teclas com a janela da tabela em foco (navegador, OBS em "interagir"). O que e
+// tratado aqui fica anotado para o mesmo comando do atalho global ser ignorado.
+const LOCAL_KEY_ECHO_MS = 500;
+const localKeyAt = {};
+function localKey(name) {
+  localKeyAt[name] = Date.now();
+  applyOverlayCommand(name);
+}
+
 document.addEventListener("keydown", (e) => {
   const c = e.code;
   const k = e.key;
-  if (c === "Digit0" || c === "Numpad0" || k === "0") {
-    standingsView = !!(rltConfig && rltConfig.standingsRows && rltConfig.standingsRows.length) && !showingStandings(); // alterna o que esta na tela (igual ao comando)
-    render(latestStandings);
-    return;
-  }
+  if (c === "Digit0" || c === "Numpad0" || k === "0") return localKey("overlay.toggleStandings");
   // pelo caractere (e.key), nao pela posicao da tecla (e.code): num teclado
   // ABNT2 a posicao "BracketLeft" e a tecla do acento agudo
-  if (k === ",") applyOverlayCommand("overlay.prevColumn");
-  else if (k === ".") applyOverlayCommand("overlay.nextColumn");
-  else if (k === "[" || k === "{") applyOverlayCommand("overlay.prevPage");
-  else if (k === "]" || k === "}") applyOverlayCommand("overlay.nextPage");
-  else if (c === "KeyP" || k === "p" || k === "P") applyOverlayCommand("overlay.toggleHighlight");
-  else if (k === "9") applyOverlayCommand("overlay.toggleBattles");
+  if (k === ",") localKey("overlay.prevColumn");
+  else if (k === ".") localKey("overlay.nextColumn");
+  else if (k === "[" || k === "{") localKey("overlay.prevPage");
+  else if (k === "]" || k === "}") localKey("overlay.nextPage");
+  else if (c === "KeyP" || k === "p" || k === "P") localKey("overlay.toggleHighlight");
+  else if (k === "9") localKey("overlay.toggleBattles");
 });
 
 setInterval(() => {
