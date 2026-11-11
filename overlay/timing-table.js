@@ -1634,25 +1634,44 @@ function standingsRowsToShow(standings) {
 
 // Ordem da tela de pontuacao. Na corrida, a ordem e a da pista (posicao ao
 // vivo, na classe quando a pagina e por classe), e o numero da linha e essa
-// posicao; quem pontuou no campeonato mas nao esta nesta corrida vai para o
-// fim, sem numero. Fora da corrida, a ordem do campeonato.
+// posicao. Depois vem quem abandonou (DNF), na ordem em que estava, marcado
+// DNF; por ultimo quem pontuou no campeonato mas nao esta nesta corrida, sem
+// numero. (Antes o DNF ia junto com esses e, com o grid cheio, caia na parte
+// da tabela que fica em rodizio: sumia da tela.) Fora da corrida, a ordem do
+// campeonato.
 function standingsOrder(list, classMode, standings) {
   const champ = (r) => (classMode ? classStandingPos(r) : r.position || 999);
-  const live = isRaceSession() && standings && standings.length ? liveRacePosByDriver(standings, classMode) : null;
+  const inRace = isRaceSession() && standings && standings.length;
+  const live = inRace ? liveRacePosByDriver(standings, classMode) : null;
+  const out = inRace ? dnfOrderByDriver(standings) : null;
   const racePos = new Map(list.map((r) => [r, live ? lookupLivePos(r, live) : null]));
+  const dnfPos = new Map(list.map((r) => [r, out && racePos.get(r) == null ? lookupLivePos(r, out) : null]));
+  // 0 correndo, 1 abandonou, 2 fora da corrida
+  const tier = (r) => (racePos.get(r) != null ? 0 : dnfPos.get(r) != null ? 1 : 2);
   return list
     .slice()
     .sort((a, b) => {
-      const pa = racePos.get(a);
-      const pb = racePos.get(b);
-      if (live && (pa != null || pb != null)) {
-        if (pa == null) return 1;
-        if (pb == null) return -1;
-        if (pa !== pb) return pa - pb;
+      if (inRace) {
+        const ta = tier(a);
+        const tb = tier(b);
+        if (ta !== tb) return ta - tb;
+        if (ta === 0 && racePos.get(a) !== racePos.get(b)) return racePos.get(a) - racePos.get(b);
+        if (ta === 1 && dnfPos.get(a) !== dnfPos.get(b)) return dnfPos.get(a) - dnfPos.get(b);
       }
       return champ(a) - champ(b);
     })
-    .map((r) => ({ row: r, position: live ? (racePos.get(r) != null ? racePos.get(r) : "–") : champ(r) }));
+    .map((r) => ({ row: r, position: !inRace ? champ(r) : tier(r) === 0 ? racePos.get(r) : tier(r) === 1 ? "DNF" : "–" }));
+}
+
+// Quem abandonou, na ordem em que estava (a ultima posicao antes de sair), com
+// as mesmas chaves da posicao ao vivo
+function dnfOrderByDriver(standings) {
+  const map = new Map();
+  (standings || [])
+    .filter((e) => isDnf(e))
+    .sort((a, b) => (a._lastPos || a.position || 999) - (b._lastPos || b.position || 999))
+    .forEach((e, i) => setLivePos(map, e, i + 1));
+  return map;
 }
 
 function buildStandingsDisplayList(standings) {
@@ -1871,6 +1890,7 @@ function renderStandings(standings) {
     el.style.backgroundColor = rowBg(isAssisted ? "#006bdd" : "#0e42a5");
     const posEl = el.querySelector(".pos");
     posEl.textContent = String(pos || "—");
+    posEl.classList.toggle("pos-dnf", pos === "DNF");
     posEl.style.background = clr || "#0e42a5";
     posEl.style.color = contrastText(clr || "#0e42a5");
     applyLogo(el.querySelector(".logo"), row.teamName, row.teamName);
@@ -2237,6 +2257,8 @@ function renderTable(standings) {
     }
   }
 
+  const overtakeBefore = overtakeSnapshot(container);
+
   let prevFastestMs = null;
   let bestFastestMs = null;
 
@@ -2468,6 +2490,70 @@ function renderTable(standings) {
       }
     }
     prevFastestMs = entry.fastestLapMs > 0 ? entry.fastestLapMs : prevFastestMs;
+  });
+  overtakeAnimate(container, overtakeBefore, displayList, `${document.getElementById("pageLabel").textContent}|${showingStandings()}`);
+}
+
+// ---- animacao de ultrapassagem ----
+// As linhas sao reaproveitadas pela posicao (a linha do 3o lugar continua sendo o
+// mesmo elemento; so o piloto dentro dela muda). Para animar, a tecnica FLIP:
+// antes de redesenhar, guarda a altura de cada piloto na tela; depois, cada linha
+// que mudou de piloto comeca na altura antiga dele e desliza ate a nova.
+//   quem ganhou a posicao passa POR CIMA (na frente, cresce um pouco, com sombra)
+//   quem perdeu desce POR BAIXO (atras, um pouco escurecido)
+// Nao anima: troca de pagina ou de tela, o rodizio de linhas, saltos grandes (na
+// classificacao alguem que melhora a volta sobe varias posicoes de uma vez), o
+// modo "30 FPS, sem animacoes" e a overlay escondida no OBS.
+const OVERTAKE_MS = 700;
+const OVERTAKE_MAX_ROWS = 4; // ate quantas linhas de distancia ainda e "ultrapassagem"
+let overtakePageKey = null;
+
+function overtakeSnapshot(container) {
+  const tops = new Map();
+  Array.from(container.children).forEach((el) => {
+    if (el.dataset.view === "standings" || el.dataset.kind !== "row") return; // pontuacao, cabecalho, espaco
+    if (el.dataset.name) tops.set(el.dataset.name, el.offsetTop);
+  });
+  return tops;
+}
+
+function overtakeAnimate(container, before, displayList, pageKey) {
+  const samePage = pageKey === overtakePageKey;
+  overtakePageKey = pageKey;
+  if (!samePage || !before.size) return;
+  if (LLGFrameCap.get() > 0 || LLGFrameCap.isHidden() || typeof Element.prototype.animate !== "function") return;
+  const rows = Array.from(container.children);
+  const rowStep = (rows[1] && rows[0] && Math.abs(rows[1].offsetTop - rows[0].offsetTop)) || 49;
+  rows.forEach((el, i) => {
+    const item = displayList[i];
+    if (!item || item.type !== "row" || item.rotating || !el.dataset.name || !before.has(el.dataset.name)) return;
+    const d = before.get(el.dataset.name) - el.offsetTop; // > 0: veio de baixo (ganhou)
+    if (Math.abs(d) < 2 || Math.abs(d) > rowStep * OVERTAKE_MAX_ROWS + 4) return;
+    if (el._overtake) el._overtake.cancel();
+    const up = d > 0;
+    el.style.position = "relative";
+    el.style.zIndex = up ? "3" : "1";
+    const frames = up
+      ? [
+          { transform: `translateY(${d}px) scale(1)`, boxShadow: "0 0 0 rgba(0,0,0,0)" },
+          { transform: `translateY(${d * 0.45}px) scale(1.045)`, boxShadow: "0 8px 22px rgba(0,0,0,0.55)", offset: 0.5 },
+          { transform: "translateY(0) scale(1)", boxShadow: "0 0 0 rgba(0,0,0,0)" },
+        ]
+      : [
+          { transform: `translateY(${d}px) scale(1)`, filter: "brightness(1)" },
+          { transform: `translateY(${d * 0.55}px) scale(0.985)`, filter: "brightness(0.75)", offset: 0.5 },
+          { transform: "translateY(0) scale(1)", filter: "brightness(1)" },
+        ];
+    const anim = el.animate(frames, { duration: OVERTAKE_MS, easing: "cubic-bezier(0.25, 0.8, 0.25, 1)" });
+    el._overtake = anim;
+    const done = () => {
+      if (el._overtake !== anim) return;
+      el._overtake = null;
+      el.style.zIndex = "";
+      el.style.position = "";
+    };
+    anim.onfinish = done;
+    anim.oncancel = done;
   });
 }
 

@@ -123,3 +123,36 @@ test("so a melhor parcial da classe fica roxa: a roxa batida por outro carro vir
   t.update([car("A", 1, 30000, null, null), car("B", 1, 29800, null, null), car("C", 1, 25000, null, null, { carClass: "LMP2" })], cls, 300);
   assert.equal(t.view("B", 300)[0].color, "purple");
 });
+
+test("diferenca para a MELHOR VOLTA do lider (setor a setor) e a soma das diferencas", () => {
+  const t = createSectorTracker();
+  // lider: melhor volta 89.0 = 29.5 + 30.0 + 29.5; melhores parciais soltas 29.0 / 29.8 / 29.4 (de outras voltas)
+  const lider = (sector) => car("Lider", sector, null, null, null, { fastestLapMs: 89000, bestLapSector1Ms: 29500, bestLapSector2Ms: 30000, bestLapSector3Ms: 29500, bestSector1Ms: 29000, bestSector2Ms: 29800, bestSector3Ms: 29400 });
+  const me = (sector, s1, s2, s3) => car("A", sector, s1, s2, s3, { fastestLapMs: 90500 });
+  t.update([me(0, null, null, null), lider(0)], cls, 0);
+  t.update([me(1, 29700, null, null), lider(0)], cls, 100);
+  let v = t.view("A", 100);
+  assert.equal(v[0].deltaMs, 200); // 29.7 contra 29.5 da melhor volta (nao contra o 29.0 solto)
+  assert.equal(v[0].cumMs, 200);
+  t.update([me(2, 29700, 29700, null), lider(0)], cls, 200);
+  v = t.view("A", 200);
+  assert.equal(v[1].deltaMs, -300); // ganhou 0.3 no S2
+  assert.equal(v[1].cumMs, -100); // no total ate o S2: 0.1 na frente
+  t.update([me(0, 29700, 29700, 29800), lider(0)], cls, 300); // cruzou a linha
+  v = t.view("A", 300); // a volta terminada fica na tela
+  assert.equal(v[2].deltaMs, 300);
+  assert.equal(v[2].cumMs, 200); // a volta inteira: 89.2 contra 89.0
+});
+
+test("sem as parciais da melhor volta no jogo (AMS2): guarda as da volta que virou a melhor", () => {
+  const t = createSectorTracker();
+  const lider = (sector, s1, s2, s3, best) => car("Lider", sector, s1, s2, s3, { fastestLapMs: best, bestSector1Ms: 29000, bestSector2Ms: 29000, bestSector3Ms: 29000 });
+  const me = (sector, s1) => car("A", sector, s1, null, null, { fastestLapMs: 92000 });
+  t.update([lider(0, null, null, null, 0), me(0, null)], cls, 0);
+  t.update([lider(1, 29500, null, null, 0), me(0, null)], cls, 100);
+  t.update([lider(2, 29500, 30000, null, 0), me(0, null)], cls, 200);
+  // o lider fecha a volta (89.0) e o jogo confirma que e a melhor dele
+  t.update([lider(0, 29500, 30000, 29500, 89000), me(0, null)], cls, 300);
+  t.update([lider(0, 29500, 30000, 29500, 89000), me(1, 29900)], cls, 400);
+  assert.equal(t.view("A", 400)[0].deltaMs, 400); // contra o 29.5 da volta, nao o 29.0 solto
+});

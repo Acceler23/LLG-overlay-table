@@ -84,6 +84,9 @@ $V_LOCAL_VEL          = 288       # double[3], m/s
 $V_PIT_STATE          = 457       # uchar: 0=nada 1=pediu 2=entrando 3=parado 4=saindo
 $V_COUNT_LAP_FLAG     = 506       # uchar: 2 = volta e tempo valem
 $V_IN_GARAGE          = 507       # bool
+# setores da MELHOR VOLTA (nao os melhores setores soltos, que podem ser de voltas diferentes)
+$V_BEST_LAP_SECTOR1   = 528       # float, segundos
+$V_BEST_LAP_SECTOR2   = 532       # float, segundos (setor 1 + setor 2, como o mBestSector2)
 
 # SharedMemoryTelemetryData
 $TEL_ACTIVE           = 128464    # uchar, quantos TelemInfoV01 sao validos
@@ -380,6 +383,12 @@ while ($true) {
                     $sector3 = if ($currentSector -ne 2 -and $lastLap -gt 0 -and $lastS2 -gt 0 -and $lastLap -gt $lastS2) { $lastLap - $lastS2 } else { 0 }
                     $bestSector2 = if ($bestS1 -gt 0 -and $bestS2 -gt $bestS1) { $bestS2 - $bestS1 } else { 0 }
                     $bestSector3 = if ($bestLap -gt 0 -and $bestS2 -gt 0 -and $bestLap -gt $bestS2) { $bestLap - $bestS2 } else { 0 }
+                    # setores da melhor volta (S2 acumulado): o driver card compara com os do lider da classe
+                    $blS1 = [double][BitConverter]::ToSingle($buf, $v + $V_BEST_LAP_SECTOR1)
+                    $blS2 = [double][BitConverter]::ToSingle($buf, $v + $V_BEST_LAP_SECTOR2)
+                    $bestLapSector1 = if ($blS1 -gt 0) { $blS1 } else { 0 }
+                    $bestLapSector2 = if ($blS1 -gt 0 -and $blS2 -gt $blS1) { $blS2 - $blS1 } else { 0 }
+                    $bestLapSector3 = if ($bestLap -gt 0 -and $blS2 -gt 0 -and $bestLap -gt $blS2) { $bestLap - $blS2 } else { 0 }
 
                     # equipe e numero vem no nome do veiculo: "BMW M Team WRT 2026 #15:LM"
                     $teamName = $vehicleName
@@ -456,6 +465,9 @@ while ($true) {
                         bestSector1Ms = Seconds-ToMs $bestS1
                         bestSector2Ms = Seconds-ToMs $bestSector2
                         bestSector3Ms = Seconds-ToMs $bestSector3
+                        bestLapSector1Ms = Seconds-ToMs $bestLapSector1
+                        bestLapSector2Ms = Seconds-ToMs $bestLapSector2
+                        bestLapSector3Ms = Seconds-ToMs $bestLapSector3
                         causedYellow  = $false
                         lapInvalidated = $lapInvalid
                         lastImpactEt  = $lastImpactEt

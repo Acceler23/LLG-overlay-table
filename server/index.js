@@ -15,6 +15,9 @@ const { createWsServer } = require("./wsServer");
 const { startTcpBridge } = require("./tcpBridge");
 const { connectObs } = require("./obsController");
 const { createRltGate } = require("./rltGate");
+const { createSessionHold } = require("./sessionHold");
+// da classificacao para a corrida: as overlays seguram a ordem da quali ate a corrida chegar
+const sessionHold = createSessionHold();
 const { createRaceState } = require("./raceState");
 const rlt = require("./rltClient");
 const settings = require("./settings");
@@ -1226,7 +1229,7 @@ function handleGamePayload(payload) {
   if (data) trackMap.apply(data.game, data); // aprende o mapa da pista (overlay/track-map.html)
   // ACC: limite de stint escolhido no painel (0 = sem limite)
   if (data && data.game === "acc" && data.session) data.session.stintLimitMin = accStintLimitMin;
-  wss.broadcast({ type: "standings", data });
+  wss.broadcast({ type: "standings", data: sessionHold.apply(data) });
 }
 
 // ACC: sem listener. O servidor fala direto com a API de transmissao do jogo.

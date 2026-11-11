@@ -205,7 +205,8 @@ body { padding-top: 50px; }
 /* classificacao: parciais S1, S2 e S3 no estilo do WEC. Em cima o nome da
    parcial e uma barra, os dois na cor da parcial: roxo melhor da classe,
    verde melhor do piloto, amarelo pior, vermelho volta invalidada, cinza
-   ainda nao fechada. Embaixo, o tempo da parcial e a diferenca para o lider. */
+   ainda nao fechada. Embaixo, a diferenca para a mesma parcial da melhor
+   volta do lider da classe e, menor, a soma das diferencas ate ali. */
 .stat.sector {
   --sector: rgba(255, 255, 255, 0.28);
   padding: 5px 10px 5px;
@@ -222,14 +223,27 @@ body { padding-top: 50px; }
   line-height: 1;
 }
 
+/* trilho da barra; o preenchimento (i) e a distancia percorrida na parcial em
+   andamento, ou cheio na cor da parcial quando fechada */
 .stat.sector .bar {
   height: 6px;
   margin: 3px -2px 4px;
   border-radius: 3px;
-  background: var(--sector);
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
 }
+.stat.sector .bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 3px;
+  background: var(--sector);
+  transition: width 0.25s linear;
+}
+.stat.sector.running .bar i { background: rgba(255, 255, 255, 0.85); }
+.stat.sector.running .l { color: #fff; }
 
-/* tempo da parcial e, ao lado, a diferenca para o lider da classe */
+/* diferenca da parcial e, ao lado, a soma ate ali (verde: na frente do lider) */
 .stat.sector .t {
   display: flex;
   align-items: baseline;
@@ -247,8 +261,13 @@ body { padding-top: 50px; }
   font-size: 12px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
-  opacity: 0.85;
+  opacity: 0.7;
 }
+.stat.sector .d:empty, .stat.sector .v:empty { display: none; }
+
+.stat.sector .v { font-variant-numeric: tabular-nums; }
+.stat.sector .ahead { color: #2fe06a; }
+.stat.sector .behind { color: #ff6b6b; }
 
 .stat.sector.purple { --sector: #c44dff; }
 .stat.sector.green { --sector: #2fe06a; }

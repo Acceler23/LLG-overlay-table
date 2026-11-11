@@ -557,6 +557,12 @@ body.no-session { opacity: 0; }
   font-weight: 700;
 }
 
+/* pontuacao na corrida: quem abandonou fica marcado DNF no lugar da posicao */
+.col.pos.pos-dnf {
+  font-size: 13px;
+  letter-spacing: 0.5px;
+}
+
 .row.flash-up {
   animation: flashUp 0.5s ease;
 }

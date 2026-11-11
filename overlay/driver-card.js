@@ -281,6 +281,78 @@ function renderPedals(stats, entry) {
   stats.querySelector(".speed").textContent = typeof entry.speedKmh === "number" ? String(Math.round(entry.speedKmh)) : "—";
 }
 
+// ---- classificacao: as tres parciais da volta, no estilo do WEC ----
+// Em cima o nome e a barra da parcial. A barra da parcial em andamento enche
+// com a distancia percorrida nela (setores aprendidos pelo servidor, no mapa
+// da pista); as fechadas ficam cheias, na cor da parcial (shared/sectors.js).
+// Embaixo, UM numero por parcial, para nao poluir:
+//   fechada       a diferenca para a mesma parcial da MELHOR VOLTA do lider da
+//                 classe (verde mais rapido, vermelho mais lento); sem ninguem
+//                 com volta para comparar, o tempo da parcial
+//   em andamento  a soma das diferencas ate ali (Σ), menor e apagada
+//   fim da volta  no S3, ao lado, o total da volta contra a melhor do lider
+let trackSectors = null; // { length, starts: [0, inicio do S2, inicio do S3] }
+
+function sectorProgress(entry, i) {
+  if (!trackSectors || typeof entry.lapDistance !== "number") return null;
+  const start = trackSectors.starts[i];
+  const end = i < 2 ? trackSectors.starts[i + 1] : trackSectors.length;
+  if (!(end > start)) return null;
+  return Math.max(0, Math.min(1, (entry.lapDistance - start) / (end - start)));
+}
+
+function renderSectors(stats, entry) {
+  if (stats.dataset.mode !== "sectors") {
+    stats.dataset.mode = "sectors";
+    stats.classList.remove("pedals");
+    stats.innerHTML = [0, 1, 2]
+      .map((i) => `<div class="stat sector"><div class="l">S${i + 1}</div><div class="bar"><i></i></div><div class="t"><span class="v"></span><span class="d"></span></div></div>`)
+      .join("");
+  }
+  const sectors = sectorTracker.view(entry.name, Date.now());
+  const signed = (ms) => `${ms > 0 ? "+" : ms < 0 ? "-" : ""}${(Math.abs(ms) / 1000).toFixed(3)}`;
+  const tone = (ms) => (ms < 0 ? "ahead" : ms > 0 ? "behind" : "");
+  const cur = typeof entry.currentSector === "number" ? entry.currentSector : null;
+  const lapDone = sectors.every((s) => s.ms != null); // volta terminada na tela
+  Array.from(stats.children).forEach((cell, i) => {
+    const sec = sectors[i];
+    const closed = sec.ms != null;
+    const open = !closed && !lapDone && i === cur;
+    cell.className = `stat sector${closed && sec.color ? " " + sec.color : ""}${open ? " running" : ""}`;
+
+    // barra: cheia quando fechada, enchendo na parcial em andamento
+    const p = closed ? 1 : open ? sectorProgress(entry, i) : 0;
+    const fill = cell.querySelector(".bar i");
+    const w = Math.round((p == null ? 0 : p) * 1000) / 10;
+    const before = Number(fill.dataset.w || 0);
+    fill.style.transition = w < before - 1 ? "none" : ""; // volta nova: zera sem animar para tras
+    fill.style.width = `${w}%`;
+    fill.dataset.w = String(w);
+
+    let main = "";
+    let mainTone = "";
+    let side = "";
+    let sideTone = "";
+    if (closed) {
+      main = sec.deltaMs != null ? signed(sec.deltaMs) : formatTime(sec.ms);
+      mainTone = sec.deltaMs != null ? tone(sec.deltaMs) : "";
+      if (lapDone && i === 2 && sec.cumMs != null) {
+        side = `${signed(sec.cumMs)}`;
+        sideTone = tone(sec.cumMs);
+      }
+    } else if (open && i > 0 && sectors[i - 1].cumMs != null) {
+      side = `${signed(sectors[i - 1].cumMs)}`;
+      sideTone = tone(sectors[i - 1].cumMs);
+    }
+    const v = cell.querySelector(".v");
+    const d = cell.querySelector(".d");
+    if (v.textContent !== main) v.textContent = main;
+    v.className = `v ${mainTone}`.trim();
+    if (d.textContent !== side) d.textContent = side;
+    d.className = `d ${sideTone}`.trim();
+  });
+}
+
 // classificacao e time attack: o card mostra as parciais da volta
 function isQualifying() {
   return latestSessionState === 3 || latestSessionState === 6;
@@ -391,6 +463,9 @@ function renderNow() {
     stats.classList.remove("pedals");
   }
   // pontuacao so com temporada do RLT aplicada
+  if (stats.dataset.mode === "sectors" && !(isQualifying() && !(showingStandings() && rltConfig && rltConfig.standingsRows && rltConfig.standingsRows.length))) {
+    stats.dataset.mode = "";
+  }
   if (showingStandings() && rltConfig && rltConfig.standingsRows && rltConfig.standingsRows.length) {
     const row = findStandingsRow(entry);
     // temporada com mais de uma classe: posicao, pontos e gap DENTRO da classe do
@@ -417,21 +492,7 @@ function renderNow() {
       <div class="stat"><div class="v">${gap}</div><div class="l">Gap líder</div></div>
     `;
   } else if (isQualifying()) {
-    // classificacao: as tres parciais da volta, no estilo do WEC. Em cima o
-    // nome e a barra da parcial, na cor dela (shared/sectors.js); embaixo, ao
-    // ser fechada, o tempo e a diferenca para o lider da classe.
-    const sectors = sectorTracker.view(entry.name, Date.now());
-    stats.innerHTML = sectors
-      .map((sec, i) => {
-        const cls = sec.color ? ` ${sec.color}` : "";
-        const time = sec.ms != null ? formatTime(sec.ms) : "&nbsp;";
-        let delta = "";
-        if (sec.ms != null && sec.deltaMs != null) {
-          delta = `${sec.deltaMs > 0 ? "+" : sec.deltaMs < 0 ? "-" : ""}${(Math.abs(sec.deltaMs) / 1000).toFixed(3)}`;
-        }
-        return `<div class="stat sector${cls}"><div class="l">S${i + 1}</div><div class="bar"></div><div class="t"><span class="v">${time}</span><span class="d">${delta}</span></div></div>`;
-      })
-      .join("");
+    renderSectors(stats, entry);
   } else if (isTimedSession()) {
     // treino: velocidade, melhor volta e diferenca pro lider da classe
     const speed = typeof entry.speedKmh === "number" ? `${Math.round(entry.speedKmh)} km/h` : "—";
@@ -490,6 +551,12 @@ function connect() {
         render();
       } else if (msg.type === "hello") {
         checkBuildId(msg.buildId);
+      } else if (msg.type === "trackMap") {
+        // onde comeca cada setor (metros) e o comprimento da pista: a barra do
+        // setor enche com a distancia percorrida nele
+        const m = msg.data;
+        trackSectors = m && Array.isArray(m.sectors) && m.sectors.length === 2 && m.length > 0 ? { length: m.length, starts: [0, m.sectors[0], m.sectors[1]] } : null;
+        render();
       } else if (msg.type === "rltConfig") {
         rltConfig = msg.data || null;
         if (!!!(rltConfig && rltConfig.standingsRows && rltConfig.standingsRows.length)) standingsView = false; // sem pontuacao: volta para a corrida
