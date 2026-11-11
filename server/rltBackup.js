@@ -75,7 +75,8 @@ const color = (c) => (c && String(c).trim()) || null;
 
 // Pilotos do lineup no formato que rltClient.mergeLineupIntoStandings espera.
 //   lineups: [{ Driver, Team, RaceNumber, ... }]   teams: [{ UniqueName, Name, FullName, Color, SecondaryColor }]
-function lineupDrivers(lineups, teams, inGame) {
+//   features: nome do piloto (minusculas) -> DriverFeatures do drivers.json (reserva do lineup)
+function lineupDrivers(lineups, teams, inGame, features) {
   const byTeam = new Map((teams || []).map((t) => [t.UniqueName, t]));
   return (lineups || [])
     .filter((s) => s && s.Driver)
@@ -85,6 +86,9 @@ function lineupDrivers(lineups, teams, inGame) {
       if (t) d.teamInfo = { fullName: t.FullName || t.Name, primaryColor: color(t.Color), secondaryColor: color(t.SecondaryColor) };
       const names = inGame.get(String(s.Driver).toLowerCase());
       if (names) d.inGameNames = names;
+      // categoria do piloto (ex: "Pro", "Am"): liga a classe sozinho quando ele vem sem classe
+      const feat = s.DriverFeatures || (features && features.get(String(s.Driver).toLowerCase())) || null;
+      if (feat) d.driverFeatures = String(feat);
       return d;
     });
 }
@@ -264,7 +268,7 @@ function createBackup(opts = {}) {
       classes: seasonClasses(stats),
       events: seasonEvents(stats),
       standings,
-      lineupDrivers: lineupDrivers(lineups, teams, inGame),
+      lineupDrivers: lineupDrivers(lineups, teams, inGame, new Map((drivers || []).filter((x) => x && x.Name && x.DriverFeatures).map((x) => [String(x.Name).toLowerCase(), String(x.DriverFeatures)]))),
       file: standingsFile.name,
       exportedAt: (standings && standings.metadata && standings.metadata.exportedAt) || null,
     };

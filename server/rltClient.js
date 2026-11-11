@@ -689,6 +689,8 @@ function buildStandingsRows(standingsData, classes) {
 function clearSeason() {
   selectedSeasonId = null;
   backupInfo = null;
+  featureByDriver = new Map();
+  featureClass = new Map();
   cache.seasonDetail = null;
   cache.standings = null;
   cache.classes = [];
@@ -713,6 +715,7 @@ async function selectBackupSeason(seasonId) {
   cache.standings = standings;
   cache.drivers = buildDrivers(standings, data.classes);
   cache.standingsRows = buildStandingsRows(standings, data.classes);
+  learnFeatureClasses(data.lineupDrivers, cache.drivers);
   startRefresh();
   return getOverlayPayload();
 }
@@ -756,6 +759,8 @@ async function selectSeason(seasonId) {
   const rows = buildStandingsRows(standings, classes);
   // agora sim: troca a temporada de uma vez
   backupInfo = null;
+  featureByDriver = new Map(); // a classe automatica pela categoria e so do backup
+  featureClass = new Map();
   selectedSeasonId = id;
   cache.seasonDetail = detail;
   cache.classes = classes;
@@ -837,21 +842,94 @@ function getManualClasses() {
 }
 
 const NO_CLASS = "—";
-// Pilotos (drivers) e linhas da pontuacao com a classe manual aplicada
+
+// ---- classe automatica para quem vem sem classe (backup do Drive) ----
+// Quem esta no lineup mas ainda nao pontuou pode vir sem classe. A classe e
+// escolhida sozinha:
+//   - uma classe de carro na pista (ou sem sessao): pela categoria do piloto
+//     (DriverFeatures do lineup/drivers.json: "Pro", "Amateur", "Rookie"). A
+//     ligacao categoria -> classe e aprendida com quem ja tem classe na temporada
+//     (Pro -> Profissional, Amateur -> Amador, Rookie -> Estreiante); categoria
+//     que ninguem com classe tem: pelo nome parecido
+//   - mais de uma classe de carro na pista (ex: Hyper, LMP2 e GT3): pela classe
+//     do carro do piloto no jogo, comparada com o nome das classes da temporada
+// A classe do RLT e a escolhida a mao no painel tem prioridade.
+let featureByDriver = new Map(); // piloto do RLT -> categoria (DriverFeatures)
+let featureClass = new Map(); // categoria (minusculas) -> uniqueName da classe
+let autoCtx = { carClasses: [], carClassByDriver: new Map() }; // da sessao ao vivo (server/index.js)
+
+const squash = (v) => String(v == null ? "" : v).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+
+function learnFeatureClasses(lineupDrivers, drivers) {
+  featureByDriver = new Map((lineupDrivers || []).filter((d) => d.driverName && d.driverFeatures).map((d) => [d.driverName, String(d.driverFeatures)]));
+  const votes = new Map(); // categoria -> { classe: quantos }
+  (drivers || []).forEach((d) => {
+    const feat = featureByDriver.get(d.driverName);
+    if (!feat || !d.uniqueName || d.uniqueName === NO_CLASS) return;
+    const k = feat.toLowerCase();
+    const v = votes.get(k) || {};
+    v[d.uniqueName] = (v[d.uniqueName] || 0) + 1;
+    votes.set(k, v);
+  });
+  featureClass = new Map([...votes.entries()].map(([k, v]) => [k, Object.entries(v).sort((a, b) => b[1] - a[1])[0][0]]));
+}
+
+// a classe da temporada com nome parecido (igual, ou um contem o outro), ou null
+function classByName(text) {
+  const t = squash(text);
+  if (!t) return null;
+  const classes = cache.classes || [];
+  const keys = (c) => [c.uniqueName, c.name, c.abbreviation].map(squash).filter(Boolean);
+  return (
+    classes.find((c) => keys(c).includes(t)) ||
+    classes.find((c) => keys(c).some((k) => k.length >= 2 && t.length >= 2 && (k.startsWith(t) || t.startsWith(k)))) ||
+    null
+  );
+}
+
+function autoClassFor(driverName) {
+  const classes = cache.classes || [];
+  if (!driverName || !classes.length) return null;
+  if (autoCtx.carClasses.length > 1) {
+    const car = autoCtx.carClassByDriver.get(driverName);
+    return car ? classByName(String(car).replace(/_(LD|HD|SW)(?=_|$)/gi, "")) : null;
+  }
+  const feat = featureByDriver.get(driverName);
+  if (!feat) return null;
+  const learned = featureClass.get(feat.toLowerCase());
+  return (learned && classes.find((c) => c.uniqueName === learned)) || classByName(feat);
+}
+
+// Sessao ao vivo (server/index.js): as classes de carro na pista e a de cada
+// piloto do RLT reconhecido. Devolve true quando mudou (a temporada e mandada de novo).
+function setAutoClassContext(carClasses, carClassByDriver) {
+  const next = { carClasses: [...new Set(carClasses || [])].sort(), carClassByDriver: new Map(Object.entries(carClassByDriver || {})) };
+  const same =
+    JSON.stringify(next.carClasses) === JSON.stringify(autoCtx.carClasses) &&
+    JSON.stringify([...next.carClassByDriver].sort()) === JSON.stringify([...autoCtx.carClassByDriver].sort());
+  autoCtx = next;
+  return !same;
+}
+
+// Pilotos (drivers) e linhas da pontuacao com a classe manual (painel) ou a
+// automatica aplicada, so em quem veio sem classe
 function withManualClasses(list, kind) {
   const manual = getManualClasses();
   const classes = cache.classes || [];
-  if (!Object.keys(manual).length || !classes.length) return list;
+  if (!classes.length) return list;
   return list.map((d) => {
-    const key = kind === "row" ? d.driverName : d.driverName || d.displayName;
+    const key = d.driverName || (kind === "row" ? null : d.displayName);
     const current = kind === "row" ? d.classUniqueName : d.uniqueName;
+    if (current !== NO_CLASS) return d;
     const want = manual[key];
-    const cls = want && current === NO_CLASS ? classes.find((c) => c.uniqueName === want) : null;
+    let cls = want ? classes.find((c) => c.uniqueName === want) : null;
+    const how = cls ? { manualClass: true } : { autoClass: true };
+    if (!cls) cls = autoClassFor(key);
     if (!cls) return d;
     const color = normalizeColor(cls.color || null);
     return kind === "row"
-      ? Object.assign({}, d, { classUniqueName: cls.uniqueName, className: cls.name || cls.uniqueName, color, manualClass: true })
-      : Object.assign({}, d, { uniqueName: cls.uniqueName, name: cls.name || cls.uniqueName, abbreviation: cls.abbreviation || null, color, manualClass: true });
+      ? Object.assign({}, d, { classUniqueName: cls.uniqueName, className: cls.name || cls.uniqueName, color }, how)
+      : Object.assign({}, d, { uniqueName: cls.uniqueName, name: cls.name || cls.uniqueName, abbreviation: cls.abbreviation || null, color }, how);
   });
 }
 
@@ -865,7 +943,10 @@ function classlessDrivers() {
   return {
     classes: (cache.classes || []).map((c) => ({ uniqueName: c.uniqueName, name: c.name || c.uniqueName, color: normalizeColor(c.color || null) })),
     drivers: [...byName.entries()]
-      .map(([name, displayName]) => ({ name, displayName: displayName || name, classUniqueName: manual[name] || null }))
+      .map(([name, displayName]) => {
+        const auto = autoClassFor(name);
+        return { name, displayName: displayName || name, classUniqueName: manual[name] || null, autoClass: auto ? auto.uniqueName : null };
+      })
       .sort((a, b) => String(a.displayName).localeCompare(String(b.displayName))),
   };
 }
@@ -947,6 +1028,7 @@ async function syncChanges() {
 }
 
 module.exports = {
+  setAutoClassContext,
   setBackupSource,
   setManualClasses,
   getManualClasses,

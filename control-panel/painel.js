@@ -830,7 +830,13 @@
         lbl.className = "lbl";
         lbl.textContent = p.displayName || p.name;
         const sel = document.createElement("select");
-        sel.innerHTML = '<option value="">Sem classe</option>';
+        // sem escolha: vale a classe automatica (categoria do piloto ou classe do carro), se houver
+        const auto = p.autoClass ? d.classes.find((c) => c.uniqueName === p.autoClass) : null;
+        sel.innerHTML = "";
+        const first = document.createElement("option");
+        first.value = "";
+        first.textContent = auto ? `Automática: ${auto.name}` : "Sem classe";
+        sel.appendChild(first);
         d.classes.forEach((c) => {
           const o = document.createElement("option");
           o.value = c.uniqueName;

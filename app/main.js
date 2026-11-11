@@ -324,7 +324,13 @@ function setPilot(patch) {
     const s = ovState(p.id);
     if (typeof p.visible === "boolean") s.visible = p.visible;
     if (typeof p.scale === "number" && p.scale > 0) s.scale = Math.max(0.5, Math.min(2.5, p.scale));
-    if (typeof p.opacity === "number") s.opacity = Math.max(0, Math.min(1, p.opacity));
+    if (typeof p.opacity === "number") {
+      s.opacity = Math.max(0, Math.min(1, p.opacity));
+      // fica salva para o jogo da vez (server/gameProfiles.js): cada jogo com a sua
+      try {
+        require(path.join(ROOT, "server", "index.js")).notePilotOpacity(p.id, s.opacity);
+      } catch (_) {}
+    }
     if (p.reset) {
       s.x = null;
       s.y = null;
@@ -569,6 +575,22 @@ if (!app.requestSingleInstanceLock()) {
       return;
     }
     ports = { http: server.HTTP_PORT, bridge: server.BRIDGE_PORT };
+
+    // opacidades por jogo: quando outro jogo entra numa sessao (e ao abrir, com o
+    // ultimo usado), as janelas do pilotar ficam com as opacidades salvas dele
+    server.onGameProfile((game, prof) => {
+      if (!prof || !prof.pilot) return;
+      let changed = false;
+      Object.entries(prof.pilot).forEach(([id, v]) => {
+        if (!PILOT_OVERLAYS[id] || typeof v !== "number") return;
+        ovState(id).opacity = Math.max(0, Math.min(1, v));
+        applyOpacity(id);
+        changed = true;
+      });
+      if (!changed) return;
+      saveState();
+      if (panelWin) panelWin.webContents.send("pilot:changed", pilotState());
+    });
 
     const parent = ["-ParentPid", String(process.pid)]; // os scripts fecham sozinhos se o app morrer
     const listenerArgs = ["-BridgePort", String(ports.bridge)].concat(parent);

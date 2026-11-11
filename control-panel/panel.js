@@ -21,6 +21,25 @@ socket.addEventListener("message", async (ev) => {
     window.__panelBuildId = msg.panelBuildId;
     return;
   }
+  // opacidade da transmissao (do jogo que entrou na sessao, ou de outro painel):
+  // os sliders acompanham
+  if (msg.type === "overlayCommand" && msg.name === "overlay.setOpacity" && msg.payload) {
+    const target = msg.payload.target;
+    const ids = { table: ["opTable", "opTableVal"], rows: ["opRows", "opRowsVal"], map: ["opMap", "opMapVal"] }[target];
+    const v = Math.round(Math.max(0, Math.min(1, Number(msg.payload.value))) * 100);
+    if (ids && Number.isFinite(v)) {
+      const slider = document.getElementById(ids[0]);
+      if (slider && document.activeElement !== slider) slider.value = v;
+      const label = document.getElementById(ids[1]);
+      if (label) label.textContent = v + "%";
+      if (target === "map") {
+        try {
+          localStorage.setItem("opMapPanel", String(v));
+        } catch (_) {}
+      }
+    }
+    return;
+  }
   if (msg.type !== "rltConfig" || !msg.data || !msg.data.seasonId) return;
   const sel = document.getElementById("rltSeason");
   const id = String(msg.data.seasonId);

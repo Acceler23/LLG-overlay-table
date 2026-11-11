@@ -16,6 +16,7 @@ const { startTcpBridge } = require("./tcpBridge");
 const { connectObs } = require("./obsController");
 const { createRltGate } = require("./rltGate");
 const { createSessionHold } = require("./sessionHold");
+const { createGameProfiles } = require("./gameProfiles");
 // da classificacao para a corrida: as overlays seguram a ordem da quali ate a corrida chegar
 const sessionHold = createSessionHold();
 const { createRaceState } = require("./raceState");
@@ -198,6 +199,51 @@ function resetRace() {
   wss.broadcast({ type: "overlayCommand", name: "overlay.resetRace", payload: {} });
 }
 wss.onCommand("race.reset", resetRace);
+
+// ---- opacidades por jogo (server/gameProfiles.js) ----
+// O jogo "da vez" e o ultimo que teve uma sessao com carros (fica salvo: ao
+// abrir o app, vale o ultimo usado). Mexer num slider salva para ele; quando
+// outro jogo entra numa sessao, as opacidades dele sao mandadas as overlays do
+// OBS e ao aplicativo (janelas do pilotar).
+const gameProfiles = createGameProfiles(settings);
+let profileGame = settings.get("lastGame") || null;
+const gameProfileListeners = [];
+
+function opacityCommands(game) {
+  const prof = gameProfiles.get(game);
+  if (!prof) return [];
+  return Object.entries(prof.broadcast).map(([target, value]) => ({ type: "overlayCommand", name: "overlay.setOpacity", payload: { target, value, fromProfile: game } }));
+}
+
+function useGameProfile(game) {
+  if (!game || game === profileGame) return;
+  profileGame = game;
+  settings.set("lastGame", game);
+  opacityCommands(game).forEach((m) => wss.broadcast(m));
+  const prof = gameProfiles.get(game);
+  gameProfileListeners.forEach((cb) => {
+    try {
+      cb(game, prof);
+    } catch (_) {}
+  });
+}
+
+// painel: opacidade da transmissao escolhida (o comando segue para as overlays)
+wss.onCommand("overlay.setOpacity", (payload) => {
+  if (payload && payload.fromProfile) return; // e o proprio perfil sendo aplicado
+  gameProfiles.noteBroadcast(profileGame, payload && payload.target, payload && payload.value);
+});
+
+// aplicativo (app/main.js): opacidade de uma janela do pilotar escolhida
+function notePilotOpacity(id, value) {
+  gameProfiles.notePilot(profileGame, id, value);
+}
+
+// aplicativo: avisa quando o jogo muda (ja chama com o jogo atual)
+function onGameProfile(cb) {
+  gameProfileListeners.push(cb);
+  if (profileGame) cb(profileGame, gameProfiles.get(profileGame));
+}
 
 // Alternancia automatica das colunas: a cada intervalo o servidor manda o
 // mesmo comando da tecla "." (proxima coluna), entao a coluna da direita da
@@ -391,15 +437,29 @@ function updateLinkStatus() {
   // alguem na pista sem ligacao: rele o RLT mais vezes, so os perfis de quem falta
   const freeIds = st.freeDrivers.map((d) => d.driverId).filter((x) => x != null);
   rlt.setFastRefresh(st.unmatched.length > 0, freeIds);
+  // classe automatica de quem veio sem classe: as classes de carro na pista e a
+  // de cada piloto reconhecido (rltClient.setAutoClassContext)
+  const carClassByDriver = {};
+  st.linked.forEach((l) => {
+    const car = sessionCarClass.get(l.name);
+    const who = l.driver && (l.driver.driverName || l.driver.displayName);
+    if (car && who) carClassByDriver[who] = car;
+  });
+  if (rlt.setAutoClassContext([...new Set(sessionCarClass.values())], carClassByDriver)) broadcastRlt();
   refreshRltLive();
 }
 
 // nomes da sessao atual (sem os caracteres invisiveis de nomes repetidos)
 let linkTimer = null;
+const sessionCarClass = new Map(); // nome no jogo -> classe do carro (sessao atual)
 function noteSessionNames(standings) {
   const names = (standings || []).map((e) => String((e && e.name) || "").replace(/\u200B+$/, "")).filter(Boolean);
   const changed = names.length !== sessionNames.length || names.some((n, i) => n !== sessionNames[i]);
   sessionNames = names;
+  if (changed) {
+    sessionCarClass.clear();
+    (standings || []).forEach((e) => e && e.name && e.carClass && sessionCarClass.set(String(e.name).replace(/\u200B+$/, ""), String(e.carClass)));
+  }
   if (changed && !linkTimer) {
     linkTimer = setTimeout(() => {
       linkTimer = null;
@@ -534,6 +594,8 @@ setInterval(() => wss.broadcast({ type: "hello", buildId: overlayBuildId(), pane
 
 wss.onConnect((socket) => {
   if (socket.readyState === 1) socket.send(JSON.stringify({ type: "hello", buildId: overlayBuildId(), panelBuildId: panelBuildId() }));
+  // opacidades do jogo atual (a tabela nao guarda as dela: recarregada, voltava a 100%)
+  opacityCommands(profileGame).forEach((m) => socket.readyState === 1 && socket.send(JSON.stringify(m)));
   const payload = rltPayloadForOverlays();
   if (payload && socket.readyState === 1) {
     socket.send(JSON.stringify({ type: "rltConfig", data: payload }));
@@ -1225,6 +1287,7 @@ function handleGamePayload(payload) {
   }
   noteSessionNames(data && data.standings);
   noteGameSession(data); // RLT so em sessao da liga
+  if (data && Array.isArray(data.standings) && data.standings.length) useGameProfile(data.game); // opacidades do jogo
   if (data && sessionLog.apply(data)) wss.broadcast(sessionLogPayload());
   if (data) trackMap.apply(data.game, data); // aprende o mapa da pista (overlay/track-map.html)
   // ACC: limite de stint escolhido no painel (0 = sem limite)
@@ -1384,4 +1447,4 @@ app.post("/api/pilot-demo", (req, res) => {
   res.json({ ok: true, active: pilotDemo.active() });
 });
 
-module.exports = { server, ready, shutdown, setPilotDemo, HTTP_PORT: Number(HTTP_PORT), BRIDGE_PORT: Number(BRIDGE_PORT) };
+module.exports = { server, ready, shutdown, setPilotDemo, notePilotOpacity, onGameProfile, HTTP_PORT: Number(HTTP_PORT), BRIDGE_PORT: Number(BRIDGE_PORT) };

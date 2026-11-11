@@ -37,6 +37,15 @@ function createWsServer(httpServer, options) {
       if (msg.type === "command" && !socket.canCommand) return; // aparelho da rede: so le
       if (msg.type === "command") {
         if (msg.name && String(msg.name).startsWith("overlay.")) {
+          // o servidor pode observar um comando das overlays (ex: guardar a opacidade
+          // por jogo) sem deixar de repassar
+          if (commandHandlers.has(msg.name)) {
+            try {
+              commandHandlers.get(msg.name)(msg.payload || {}, socket);
+            } catch (err) {
+              console.warn("Erro ao observar " + msg.name + ":", err.message);
+            }
+          }
           const payload = JSON.stringify({ type: "overlayCommand", name: msg.name, payload: msg.payload || {} });
           for (const c of clients) {
             if (c.readyState === c.OPEN) c.send(payload);
