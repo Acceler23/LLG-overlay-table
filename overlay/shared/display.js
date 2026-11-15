@@ -166,7 +166,8 @@
     return standings;
   }
 
-  // Caminhos a tentar para o logo de um piloto: equipe primeiro, depois carro.
+  // Caminhos a tentar para o logo de um piloto: equipe primeiro, depois carro
+  // (prefer "car": o do carro primeiro; sem ele, o da equipe).
   // variant ("light" ou "dark", opcional): versao do logo para um fundo que
   // faria o logo normal sumir. O arquivo tem o mesmo nome com o sufixo
   // "__light" ou "__dark" antes da extensao (apex.png -> apex__light.png):
@@ -174,14 +175,14 @@
   //   dark  = logo ESCURO, para fundo claro
   // A variante vem antes do logo normal na lista; se o arquivo nao existir, o
   // carregador (shared/logos.js) cai no normal.
-  function logoPaths(teamName, carName, localOverrides, variant) {
+  function logoPaths(teamName, carName, localOverrides, variant, prefer) {
     const carFile = carLogo(carName) || carLogoFromTeam(teamName);
     const teamFile = teamLogoFile(teamName, localOverrides);
     const team = teamFile ? `teams/${teamFile}` : null;
     const car = carFile ? `cars/${carFile}` : null;
-    if (variant !== "light" && variant !== "dark") return [team, car];
     const withSuffix = (file) => (file ? file.replace(/(\.[a-z0-9]+)?$/i, (ext) => `__${variant}${ext}`) : null);
-    return [withSuffix(team), team, withSuffix(car), car];
+    const group = (file) => (variant === "light" || variant === "dark" ? [withSuffix(file), file] : [file]);
+    return prefer === "car" ? group(car).concat(group(team)) : group(team).concat(group(car));
   }
 
   // Nome da pista para o cabecalho da tabela.

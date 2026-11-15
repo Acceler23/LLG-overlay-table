@@ -570,12 +570,19 @@ body.no-session { opacity: 0; }
   animation: flashDown 0.5s ease;
 }
 
+/* rodizio: as linhas da pagina nova sobem de baixo, aparecendo */
 .row.slide-in {
-  animation: slideInLeft 0.4s ease;
+  animation: slideInUp 0.4s ease;
 }
-@keyframes slideInLeft {
-  from { transform: translateX(-40px); opacity: 0; }
-  to { transform: translateX(0); opacity: 1; }
+@keyframes slideInUp {
+  from { transform: translateY(18px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* linha branca entre a parte fixa e a que roda (no espaco de 3 px entre as
+   linhas: a altura da tabela nao muda) */
+.row.rot-first {
+  box-shadow: 0 -3px 0 0 rgba(255, 255, 255, 0.9);
 }
 @keyframes flashUp {
   from { background-color: rgba(61, 255, 122, 0.55); }

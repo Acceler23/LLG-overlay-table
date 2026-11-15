@@ -45,6 +45,13 @@ test("caminhos de logo: equipe primeiro, carro como reserva", () => {
   assert.deepEqual(display.logoPaths("Apex", "Porsche 911 GT3 R", {}, "outra"), ["teams/apex_racing.png", "cars/porsche.png"]);
 });
 
+test("caminhos de logo com o logo do carro escolhido: carro primeiro, equipe como reserva", () => {
+  assert.deepEqual(display.logoPaths("Apex", "Porsche 911 GT3 R", {}, null, "car"), ["cars/porsche.png", "teams/apex_racing.png"]);
+  assert.deepEqual(display.logoPaths("Apex", "Porsche 911 GT3 R", {}, "light", "car"), ["cars/porsche__light.png", "cars/porsche.png", "teams/apex_racing__light.png", "teams/apex_racing.png"]);
+  assert.deepEqual(display.logoPaths("Apex", "Carro Desconhecido", {}, null, "car"), [null, "teams/apex_racing.png"], "sem logo do carro: o da equipe");
+  assert.deepEqual(display.logoPaths("Apex", "Porsche 911 GT3 R", {}, null, "team"), ["teams/apex_racing.png", "cars/porsche.png"]);
+});
+
 test("nome da pista: lista do drivers-config, senao o nome do jogo arrumado", () => {
   const { trackDisplay, setConfig } = require("../overlay/shared/display");
   setConfig({ trackNames: { Kansai: "Suzuka", "Interlagos Kart 1": "Kartódromo de Interlagos" } });

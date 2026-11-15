@@ -9,6 +9,9 @@ const { WebSocketServer } = require("ws");
 function createWsServer(httpServer, options) {
   const opts = options || {};
   const wss = new WebSocketServer({ server: httpServer, path: "/ws", verifyClient: opts.verifyClient });
+  // erro do servidor HTTP (ex: porta ocupada) chega aqui tambem; quem trata e o
+  // index.js (ready). Sem isto o processo caia antes do aviso de porta ocupada.
+  wss.on("error", () => {});
 
   const clients = new Set();
   const commandHandlers = new Map(); // registrado por outros modulos (ex: obsController)

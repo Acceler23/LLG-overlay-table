@@ -75,19 +75,27 @@ const color = (c) => (c && String(c).trim()) || null;
 
 // Pilotos do lineup no formato que rltClient.mergeLineupIntoStandings espera.
 //   lineups: [{ Driver, Team, RaceNumber, ... }]   teams: [{ UniqueName, Name, FullName, Color, SecondaryColor }]
-//   features: nome do piloto (minusculas) -> DriverFeatures do drivers.json (reserva do lineup)
-function lineupDrivers(lineups, teams, inGame, features) {
+//   profiles: nome do piloto (minusculas) -> o piloto no drivers.json (FirstName,
+//   LastName, DriverFeatures). O primeiro e o ultimo nome fazem o nome mostrado
+//   ("Cleyandson Fragoso" em vez do nome inteiro, igual a quem esta na pontuacao).
+function lineupDrivers(lineups, teams, inGame, profiles) {
   const byTeam = new Map((teams || []).map((t) => [t.UniqueName, t]));
   return (lineups || [])
     .filter((s) => s && s.Driver)
     .map((s) => {
       const t = byTeam.get(s.Team) || null;
-      const d = { driverName: s.Driver, driverInfo: { displayName: s.Driver, raceNumber: s.RaceNumber || null }, seatType: s.SeatType || null, classInfo: null, teamName: t ? t.Name : null };
+      const prof = (profiles && profiles.get(String(s.Driver).toLowerCase())) || null;
+      const driverInfo = { displayName: s.Driver, raceNumber: s.RaceNumber || null };
+      if (prof && prof.FirstName && prof.LastName) {
+        driverInfo.firstName = String(prof.FirstName).trim();
+        driverInfo.lastName = String(prof.LastName).trim();
+      }
+      const d = { driverName: s.Driver, driverInfo, seatType: s.SeatType || null, classInfo: null, teamName: t ? t.Name : null };
       if (t) d.teamInfo = { fullName: t.FullName || t.Name, primaryColor: color(t.Color), secondaryColor: color(t.SecondaryColor) };
       const names = inGame.get(String(s.Driver).toLowerCase());
       if (names) d.inGameNames = names;
       // categoria do piloto (ex: "Pro", "Am"): liga a classe sozinho quando ele vem sem classe
-      const feat = s.DriverFeatures || (features && features.get(String(s.Driver).toLowerCase())) || null;
+      const feat = s.DriverFeatures || (prof && prof.DriverFeatures) || null;
       if (feat) d.driverFeatures = String(feat);
       return d;
     });
@@ -268,7 +276,7 @@ function createBackup(opts = {}) {
       classes: seasonClasses(stats),
       events: seasonEvents(stats),
       standings,
-      lineupDrivers: lineupDrivers(lineups, teams, inGame, new Map((drivers || []).filter((x) => x && x.Name && x.DriverFeatures).map((x) => [String(x.Name).toLowerCase(), String(x.DriverFeatures)]))),
+      lineupDrivers: lineupDrivers(lineups, teams, inGame, new Map((drivers || []).filter((x) => x && x.Name).map((x) => [String(x.Name).toLowerCase(), x]))),
       file: standingsFile.name,
       exportedAt: (standings && standings.metadata && standings.metadata.exportedAt) || null,
     };

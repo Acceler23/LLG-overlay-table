@@ -341,24 +341,44 @@ const SAFETY_H = 6; // bordas da tabela (com o cabecalho de 94 px, 20 linhas dao
 const FOOTER_H = 32;
 let weatherData = false; // o jogo informa o clima (AMS2, LMU)
 let rotateTick = 0;
-const ROTATE_MS = 10000;
+let lastRotateDrawn = 0; // tique do rodizio no ultimo desenho da tabela
+// Tempo de cada pagina do rodizio (painel: Ajustes > Transmissao > Tabela de
+// tempos; o servidor guarda e manda de novo a quem conecta). Padrao 10 s.
+const ROTATE_MIN_S = 4;
+const ROTATE_MAX_S = 30;
+const clampRotate = (v) => Math.max(ROTATE_MIN_S, Math.min(ROTATE_MAX_S, Math.round(Number(v)) || 10));
+let rotateMs = 10000;
+try {
+  const saved = Number(localStorage.getItem("rotateSeconds"));
+  if (saved > 0) rotateMs = clampRotate(saved) * 1000;
+} catch (_) {}
+// rodizio manual: a pagina so vira pelo painel (ou pelas teclas - e =)
+let rotateManual = false;
+try {
+  rotateManual = localStorage.getItem("rotateManual") === "1";
+} catch (_) {}
 
 function maxDriverSlots() {
   return Math.max(1, Math.floor((MAX_TABLE_H - TITLE_H - COL_HEADER_H - SAFETY_H) / ROW_H));
 }
 
-function pickPageSynced(arr, page, count, maxPages) {
+// Pagina do rodizio sempre cheia e na ordem: a ultima pagina termina no ultimo
+// piloto e repete os de antes dele (com 16 e 10 vagas, a pagina 2 e do 7o ao
+// 16o), em vez de sobrar linha em branco ou voltar para os da frente.
+//   maxPages: com classes, o ciclo e o da classe com mais paginas: todas viram
+//   juntas e recomecam juntas; a que tem menos paginas fica na ultima ate la.
+function cyclicPage(arr, page, count, maxPages) {
   if (!arr.length || count <= 0) return [];
   if (arr.length <= count) return arr.slice();
   const pages = Math.ceil(arr.length / count);
-  const p = maxPages > 0 ? (page % maxPages) : 0;
-  if (p >= pages) {
-    // ultima pagina da classe ate o ciclo global reiniciar
-    const start = (pages - 1) * count;
-    return arr.slice(start, start + count);
-  }
-  const start = p * count;
+  const cycle = maxPages > 0 ? Math.max(maxPages, pages) : pages;
+  const p = Math.min(((page % cycle) + cycle) % cycle, pages - 1);
+  const start = Math.min(p * count, arr.length - count);
   return arr.slice(start, start + count);
+}
+
+function pickPageSynced(arr, page, count, maxPages) {
+  return cyclicPage(arr, page, count, maxPages);
 }
 
 function slotsPerClass(groups) {
@@ -524,11 +544,30 @@ function sameCarKey(e) {
   return `${e.slot}|${e.carName || ""}|${e.carNumber != null ? e.carNumber : ""}`;
 }
 
+// ---- antes da largada ----
+// Na volta de formacao e na corrida ainda sem ninguem correndo (no AMS2, todos
+// com o estado "nao largou"), os carros ficam na garagem esperando e o jogo
+// ainda mostra as voltas da classificacao: a regra de abandono (2 min na
+// garagem com voltas feitas) e a de quem sumiu da lista marcavam todo mundo
+// DNF. Ate a largada ninguem e DNF, e a coluna da direita e so a melhor volta
+// (a da corrida, se ja houver; senao a da classificacao).
+const qualiBest = new Map(); // nome -> melhor volta na classificacao (ms)
+let preRace = false;
+
+function isPreRace(list) {
+  const st = Number(latestSessionState);
+  if (st === 4) return true;
+  if (st !== 5) return false;
+  // corrida: largou quando algum carro esta correndo (2) ou ja terminou (3)
+  return !(list || []).some((e) => e && (e.raceState === 2 || e.raceState === 3));
+}
+
 function mergeDisconnectedDrivers(standings) {
   if (!isRaceSession()) {
     sessionDriverCache.clear();
     return standings;
   }
+  if (preRace) return standings; // antes da largada, quem sumiu ainda esta carregando
   const present = new Set();
   const presentCars = new Set(); // carros na pista agora (ver sameCarKey)
   (standings || []).forEach((e) => {
@@ -591,8 +630,13 @@ function handleStandings(payload) {
     if (sessionKey !== lastSessionKey) {
       lastSessionKey = sessionKey;
       resetSessionLocalState();
+      if (latestSessionState === 3) qualiBest.clear(); // classificacao nova: melhores voltas novas
     }
   }
+
+  // melhor volta de cada um na classificacao (antes da largada, e ela que aparece)
+  if (latestSessionState === 3) raw.forEach((e) => e && e.name && e.fastestLapMs > 0 && qualiBest.set(e.name, e.fastestLapMs));
+  preRace = isPreRace(raw);
 
   let standings = raw.filter((e) => !isSafetyCar(e) && !isObserver(e));
   gapTracker.update(standings, (!Array.isArray(payload) && payload.ts) || Date.now());
@@ -744,6 +788,17 @@ function applyOverlayCommand(name, payload = {}) {
     } else {
       battleMode = !battleMode;
     }
+  } else if (name === "overlay.setRotateSeconds") {
+    setRotateSeconds(payload.value, payload.manual);
+    return;
+  } else if (name === "overlay.rotateNext" || name === "overlay.rotatePrev") {
+    stepRotate(name === "overlay.rotatePrev" ? -1 : 1);
+    return;
+  } else if (name === "overlay.setLogoMode") {
+    logoPrefer = payload.value === "car" ? "car" : "team";
+    try {
+      localStorage.setItem("logoPrefer", logoPrefer);
+    } catch (_) {}
   } else if (name === "overlay.setTeamLogo") {
     setTeamLogoOverride(payload.teamName, payload.file || null);
   } else {
@@ -1085,8 +1140,15 @@ const logoLoader = LLGLogos.createLoader("assets");
 // fundo (ver logoPaths em shared/display.js); sem ela, o logo normal.
 function applyLogo(img, teamName, carName, variant) {
   if (!img) return;
-  logoLoader.load(img, LLGDisplay.logoPaths(teamName, carName, teamLogoOverrides, variant));
+  logoLoader.load(img, LLGDisplay.logoPaths(teamName, carName, teamLogoOverrides, variant, logoPrefer));
 }
+
+// Logo da equipe ("team") ou do carro ("car"), escolhido no painel. O servidor
+// guarda e manda de novo a quem conecta; aqui fica tambem a ultima escolha.
+let logoPrefer = "team";
+try {
+  if (localStorage.getItem("logoPrefer") === "car") logoPrefer = "car";
+} catch (_) {}
 
 let teamLogoOverrides = {};
 try {
@@ -1176,6 +1238,10 @@ function formatLeaderGap(entry, bestFastestMs) {
 // entry._ahead e entry._leader sao preenchidos em render() (carro da frente
 // e lider, no geral ou dentro da classe conforme a pagina).
 function rightColumnValue(entry, change, bestFastestMs, aheadFastestMs) {
+  if (preRace) {
+    const ms = entry.fastestLapMs > 0 ? entry.fastestLapMs : qualiBest.get(entry.name);
+    return { text: ms ? formatTime(ms) : "--:--.---", cls: "" };
+  }
   if (isDnf(entry)) return { text: "DNF", cls: "pos-down" };
 
   const mode = RIGHT_COLUMN_MODES[rightColumnIndex];
@@ -1284,6 +1350,7 @@ function formatPitDuration(ms) {
 }
 
 function isDnf(entry) {
+  if (preRace) return false; // antes da largada ninguem abandonou
   if (entry.disconnected) return true;
   if (entry.raceState === 6 || entry.raceState === 5 || entry.raceState === 4) return true;
   if (!entry.inRace || entry.lapsCompleted < 1) return false;
@@ -1336,13 +1403,7 @@ function formatGap(entry, change, aheadFastestMs) {
 }
 
 function pickRotated(arr, page, count, maxPages) {
-  if (maxPages != null) return pickPageSynced(arr, page, count, maxPages);
-  if (!arr.length || count <= 0) return [];
-  if (arr.length <= count) return arr.slice();
-  const pages = Math.ceil(arr.length / count);
-  const p = ((page % pages) + pages) % pages;
-  const start = p * count;
-  return arr.slice(start, start + count);
+  return cyclicPage(arr, page, count, maxPages);
 }
 
 // Top 10 fixo; o resto do grid roda em paginas no espaco que sobra.
@@ -1357,8 +1418,7 @@ function paginateFixedTop(ordered) {
   // pagina de disputas: se ha disputa nesta parte, ela fica travada nela
   const lock = battleActive() ? LLGBattles.battleWindowStart(rest.map(isBattleItem), extraSlots, rotateTick) : null;
   const picked = lock !== null ? rest.slice(lock, lock + extraSlots) : pickRotated(rest, rotateTick, extraSlots);
-  const rotated = picked.map((item) => ({ ...item, rotating: true }));
-  while (rotated.length < extraSlots) rotated.push({ type: "spacer" });
+  const rotated = picked.map((item, i) => ({ ...item, rotating: true, rotFirst: i === 0 }));
   return fixed.concat(rotated);
 }
 
@@ -1391,7 +1451,6 @@ function paginateByClass(classKeys, groups, toItems, headerFor) {
 
     if (sorted.length <= slots) {
       sorted.forEach((item) => list.push(item));
-      for (let n = sorted.length; n < slots; n++) list.push({ type: "spacer" });
       return;
     }
 
@@ -1400,8 +1459,7 @@ function paginateByClass(classKeys, groups, toItems, headerFor) {
       const restOfClass = sorted.slice(fixedCount);
       const lock = battleActive() ? LLGBattles.battleWindowStart(restOfClass.map(isBattleItem), extraSlots, rotateTick) : null;
       const page = lock !== null ? restOfClass.slice(lock, lock + extraSlots) : pickRotated(restOfClass, rotateTick, extraSlots, maxPages);
-      page.forEach((item) => list.push({ ...item, rotating: true }));
-      for (let n = page.length; n < extraSlots; n++) list.push({ type: "spacer" });
+      page.forEach((item, i) => list.push({ ...item, rotating: true, rotFirst: i === 0 }));
     }
   });
   return list;
@@ -1874,6 +1932,7 @@ function renderStandings(standings) {
       el = fresh;
     }
 
+    el.classList.toggle("rot-first", !!item.rotFirst); // linha branca entre fixos e rodizio
     // 999 = piloto do lineup que ainda nao pontuou: sem posicao no campeonato
     const rawPos = item.displayPosition != null ? item.displayPosition : row.position;
     const pos = rawPos >= 999 ? "–" : rawPos;
@@ -2185,7 +2244,7 @@ function renderTable(standings) {
   }
   // trocou de jogo e a pagina de pneus deixou de existir: volta para a primeira
   if (!rightModeAvailable(RIGHT_COLUMN_MODES[rightColumnIndex])) rightColumnIndex = 0;
-  document.getElementById("rightColumnLabel").textContent = RIGHT_COLUMN_MODES[rightColumnIndex];
+  document.getElementById("rightColumnLabel").textContent = preRace ? "Melhor volta" : RIGHT_COLUMN_MODES[rightColumnIndex];
   document.getElementById("timing-table").classList.remove("wide-right");
   document.getElementById("pageLabel").textContent = currentPageLabel(standings) + (battleActive() ? " · Disputas" : "");
 
@@ -2258,6 +2317,9 @@ function renderTable(standings) {
   }
 
   const overtakeBefore = overtakeSnapshot(container);
+  // a pagina do rodizio virou desde o ultimo desenho? (entrada do rodizio, nao ultrapassagem)
+  const pageTurned = rotateTick !== lastRotateDrawn;
+  lastRotateDrawn = rotateTick;
 
   let prevFastestMs = null;
   let bestFastestMs = null;
@@ -2395,7 +2457,11 @@ function renderTable(standings) {
       }, 500);
     }
 
-    if (item.rotating && el.dataset.name !== entry.name) {
+    // linha branca entre a parte fixa e a que roda
+    el.classList.toggle("rot-first", !!item.rotFirst);
+    // entrada do rodizio: so quando a pagina vira. Ultrapassagem dentro da parte
+    // que roda usa a animacao de ultrapassagem, como nas linhas fixas.
+    if (item.rotating && pageTurned && el.dataset.name !== entry.name) {
       el.classList.remove("slide-in");
       void el.offsetWidth;
       el.classList.add("slide-in");
@@ -2491,7 +2557,7 @@ function renderTable(standings) {
     }
     prevFastestMs = entry.fastestLapMs > 0 ? entry.fastestLapMs : prevFastestMs;
   });
-  overtakeAnimate(container, overtakeBefore, displayList, `${document.getElementById("pageLabel").textContent}|${showingStandings()}`);
+  overtakeAnimate(container, overtakeBefore, displayList, `${document.getElementById("pageLabel").textContent}|${showingStandings()}`, pageTurned);
 }
 
 // ---- animacao de ultrapassagem ----
@@ -2517,7 +2583,9 @@ function overtakeSnapshot(container) {
   return tops;
 }
 
-function overtakeAnimate(container, before, displayList, pageKey) {
+//   pageTurned: a pagina do rodizio acabou de virar (as linhas que rodam trocaram
+//   de piloto pela virada, nao por ultrapassagem: nao animam como ultrapassagem)
+function overtakeAnimate(container, before, displayList, pageKey, pageTurned) {
   const samePage = pageKey === overtakePageKey;
   overtakePageKey = pageKey;
   if (!samePage || !before.size) return;
@@ -2526,7 +2594,7 @@ function overtakeAnimate(container, before, displayList, pageKey) {
   const rowStep = (rows[1] && rows[0] && Math.abs(rows[1].offsetTop - rows[0].offsetTop)) || 49;
   rows.forEach((el, i) => {
     const item = displayList[i];
-    if (!item || item.type !== "row" || item.rotating || !el.dataset.name || !before.has(el.dataset.name)) return;
+    if (!item || item.type !== "row" || (item.rotating && pageTurned) || !el.dataset.name || !before.has(el.dataset.name)) return;
     const d = before.get(el.dataset.name) - el.offsetTop; // > 0: veio de baixo (ganhou)
     if (Math.abs(d) < 2 || Math.abs(d) > rowStep * OVERTAKE_MAX_ROWS + 4) return;
     if (el._overtake) el._overtake.cancel();
@@ -2585,12 +2653,42 @@ document.addEventListener("keydown", (e) => {
   else if (k === "]" || k === "}") localKey("overlay.nextPage");
   else if (c === "KeyP" || k === "p" || k === "P") localKey("overlay.toggleHighlight");
   else if (k === "9") localKey("overlay.toggleBattles");
+  else if (k === "-" || k === "_") localKey("overlay.rotatePrev");
+  else if (k === "=" || k === "+") localKey("overlay.rotateNext");
 });
 
-setInterval(() => {
-  rotateTick += 1;
+let rotateTimer = null;
+function startRotate() {
+  clearInterval(rotateTimer);
+  rotateTimer = null;
+  if (rotateManual) return;
+  rotateTimer = setInterval(() => {
+    rotateTick += 1;
+    if (latestStandings.length) render(latestStandings);
+  }, rotateMs);
+}
+startRotate();
+
+function setRotateSeconds(value, manual) {
+  const ms = clampRotate(value) * 1000;
+  const man = !!manual;
+  try {
+    localStorage.setItem("rotateSeconds", String(ms / 1000));
+    localStorage.setItem("rotateManual", man ? "1" : "0");
+  } catch (_) {}
+  if (ms === rotateMs && man === rotateManual) return;
+  rotateMs = ms;
+  rotateManual = man;
+  startRotate();
+}
+
+// Vira a pagina do rodizio na mao (+1 proxima, -1 anterior). No automatico o
+// tempo recomeca, para a pagina escolhida ficar o tempo inteiro na tela.
+function stepRotate(dir) {
+  rotateTick += dir < 0 ? -1 : 1;
   if (latestStandings.length) render(latestStandings);
-}, ROTATE_MS);
+  if (!rotateManual) startRotate();
+}
 
 if (DEMO) {
   latestStandings = [

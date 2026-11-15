@@ -8,6 +8,8 @@ const { contextBridge, ipcRenderer } = require("electron");
 contextBridge.exposeInMainWorld("llgApp", {
   info: () => ipcRenderer.invoke("app:info"),
   openPath: (target) => ipcRenderer.invoke("app:openPath", target),
+  // fecha e abre o aplicativo de novo (ex: depois de trocar a porta)
+  relaunch: () => ipcRenderer.invoke("app:relaunch"),
   // procura uma versao nova no GitHub; devolve o texto do resultado
   checkUpdate: () => ipcRenderer.invoke("update:check"),
   driver: {

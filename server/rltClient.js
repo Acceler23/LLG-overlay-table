@@ -24,7 +24,20 @@ const getBackup = () => backup || (backup = createBackup());
 function setBackupSource(b) {
   backup = b;
 }
-let backupInfo = null; // { seasonName, file, exportedAt } da temporada do backup aplicada
+let backupInfo = null; // { seasonName, file, exportedAt, mirrorId, reason } da temporada do backup aplicada
+
+// ---- fonte da temporada: API ou backup ----
+// O painel escolhe a temporada da liga (API). O backup do Drive entra sozinho,
+// com a temporada de mesmo nome:
+//   - em sessao single player (fora de uma sessao da liga): o servidor pede
+//     "backup" (setDesiredSource), e a API nao e usada (nao gasta o limite);
+//   - quando a API nao responde (chave vencida, limite, sem internet): a cada
+//     releitura ela e tentada de novo e, quando volta, a temporada volta para ela.
+// As escolhas manuais (ligacoes e classes) sao da temporada escolhida (o id da
+// API), entao valem nas duas fontes.
+let wanted = null; // { id, name } temporada escolhida no painel
+let desiredSource = "api"; // "api" (sessao da liga) ou "backup" (single player)
+let apiFailing = false;
 
 // A chave vem do painel de controle (pedida na primeira vez que o aplicativo
 // abre e guardada criptografada no settings.json) ou, para quem desenvolve,
@@ -689,6 +702,7 @@ function buildStandingsRows(standingsData, classes) {
 function clearSeason() {
   selectedSeasonId = null;
   backupInfo = null;
+  wanted = null;
   featureByDriver = new Map();
   featureClass = new Map();
   cache.seasonDetail = null;
@@ -704,10 +718,12 @@ function clearSeason() {
 
 // Temporada do backup do Drive: o mesmo caminho da API (pontuacao no formato
 // SeasonStatistics + lineup), so que dos arquivos exportados.
-async function selectBackupSeason(seasonId) {
+//   asSeasonId: a temporada escolhida (da API) que o backup substitui; o id dela
+//   continua sendo o da temporada aplicada. reason: "single" | "api" | "chosen"
+async function selectBackupSeason(seasonId, asSeasonId, reason) {
   const data = await getBackup().loadSeason(seasonId);
-  selectedSeasonId = seasonId;
-  backupInfo = { seasonName: data.seasonName, file: data.file, exportedAt: data.exportedAt };
+  selectedSeasonId = asSeasonId != null ? asSeasonId : seasonId;
+  backupInfo = { seasonName: data.seasonName, file: data.file, exportedAt: data.exportedAt, mirrorId: seasonId, reason: reason || "chosen" };
   cache.seasonDetail = null;
   cache.classes = data.classes;
   cache.events = data.events;
@@ -724,11 +740,84 @@ async function listBackupSeasons() {
   return getBackup().listSeasons();
 }
 
-async function selectSeason(seasonId) {
+// A temporada do backup com o mesmo nome da escolhida (sem acento, maiusculas e
+// pontuacao; ou um nome contendo o outro)
+async function findMirror(name) {
+  if (!name) return null;
+  const list = await getBackup().listSeasons();
+  const k = squash(name);
+  return list.find((x) => squash(x.seasonName) === k) || list.find((x) => squash(x.seasonName) && (squash(x.seasonName).includes(k) || k.includes(squash(x.seasonName)))) || null;
+}
+
+// Aplica o backup no lugar da temporada escolhida; false se nao ha equivalente
+async function useBackupFor(reason) {
+  if (!wanted) return false;
+  let mirror = null;
+  try {
+    mirror = await findMirror(wanted.name);
+  } catch (_) {
+    mirror = null;
+  }
+  if (!mirror) return false;
+  await selectBackupSeason(mirror.seasonId, wanted.id, reason);
+  return true;
+}
+
+const seasonNameOf = (id) => {
+  const s = (cache.seasons || []).find((x) => x.seasonId === id);
+  return s ? s.fullName || s.seasonName : null;
+};
+
+//   nameHint: nome da temporada guardado (para achar o backup quando a API nem
+//   lista as temporadas)
+async function selectSeason(seasonId, nameHint) {
   if (seasonId == null || seasonId === "" || Number(seasonId) === 0) {
     return clearSeason();
   }
-  if (isBackupId(seasonId)) return selectBackupSeason(seasonId);
+  if (isBackupId(seasonId)) {
+    wanted = null; // escolhida direto no backup (sem API nenhuma)
+    return selectBackupSeason(seasonId);
+  }
+  const id = Number(seasonId);
+  wanted = { id, name: seasonNameOf(id) || nameHint || (wanted && wanted.id === id ? wanted.name : null) };
+  // single player: direto no backup, sem gastar a API
+  if (desiredSource === "backup" && (await useBackupFor("single").catch(() => false))) return getOverlayPayload();
+  try {
+    const payload = await selectApiSeason(id);
+    apiFailing = false;
+    return payload;
+  } catch (err) {
+    apiFailing = true;
+    if (await useBackupFor("api").catch(() => false)) return getOverlayPayload();
+    throw err;
+  }
+}
+
+// O servidor diz qual fonte a sessao pede: "api" (sessao da liga) ou "backup"
+// (single player). Troca a temporada aplicada se precisar; true quando trocou.
+async function setDesiredSource(src) {
+  desiredSource = src === "backup" ? "backup" : "api";
+  if (!wanted) return false;
+  if (desiredSource === "backup" && !backupInfo) return useBackupFor("single").catch(() => false);
+  if (desiredSource === "api" && backupInfo && backupInfo.reason === "single") {
+    if (!hasKey()) {
+      backupInfo.reason = "api";
+      return false;
+    }
+    try {
+      await selectApiSeason(wanted.id);
+      apiFailing = false;
+      return true;
+    } catch (_) {
+      apiFailing = true;
+      backupInfo.reason = "api"; // continua no backup, agora porque a API nao responde
+      return false;
+    }
+  }
+  return false;
+}
+
+async function selectApiSeason(seasonId) {
   // Tudo e buscado antes de trocar a temporada: se a API falhar (chave vencida,
   // sem internet), a temporada que estava aplicada continua inteira, em vez de
   // ficar com o id da nova e os dados da anterior.
@@ -772,10 +861,23 @@ async function selectSeason(seasonId) {
 }
 
 async function refresh() {
-  // temporada do backup: rele a pasta (pode ter subido um standings novo), sem a API
-  if (isBackupId(selectedSeasonId)) {
+  if (backupInfo) {
+    // a API voltou? (so quando a sessao pede a API: em single player fica no backup)
+    if (wanted && desiredSource === "api" && hasKey()) {
+      try {
+        rltCache.useKey(apiKey);
+        await rltCache.checkChanges();
+        await selectApiSeason(wanted.id);
+        apiFailing = false;
+        if (typeof onRefreshCb === "function") onRefreshCb(getOverlayPayload());
+        return getOverlayPayload();
+      } catch (_) {
+        apiFailing = true;
+      }
+    }
+    // temporada do backup: rele a pasta (pode ter subido um standings novo), sem a API
     try {
-      await selectBackupSeason(selectedSeasonId);
+      await selectBackupSeason(backupInfo.mirrorId, selectedSeasonId, backupInfo.reason);
       if (typeof onRefreshCb === "function") onRefreshCb(getOverlayPayload());
       return getOverlayPayload();
     } catch (_) {
@@ -790,8 +892,8 @@ async function refresh() {
     await rltCache.checkChanges();
     await fetchLeague();
     await fetchSeasons();
-    if (selectedSeasonId) {
-      await selectSeason(selectedSeasonId);
+    if (wanted) {
+      await selectSeason(wanted.id, wanted.name); // falhando, cai no backup
     }
     if (typeof onRefreshCb === "function") onRefreshCb(getOverlayPayload());
     return getOverlayPayload();
@@ -802,7 +904,7 @@ async function refresh() {
 
 function startRefresh() {
   stopRefresh();
-  const fromBackup = isBackupId(selectedSeasonId);
+  const fromBackup = !!backupInfo;
   if (!hasKey() && !fromBackup) return;
   refreshTimer = setInterval(() => {
     refresh().catch(() => {});
@@ -977,6 +1079,8 @@ function getOverlayPayload() {
     seasonId: selectedSeasonId,
     seasonName: backupInfo ? backupInfo.seasonName : season && (season.fullName || season.seasonName),
     source: backupInfo ? "backup" : "api",
+    // por que o backup: "single" (sessao single player), "api" (a API nao respondeu), "chosen" (escolhido direto)
+    backupReason: backupInfo ? backupInfo.reason : null,
     classes: cache.classes || [],
     drivers: withManualClasses(cache.drivers || [], "driver"),
     standingsRows: withManualClasses(cache.standingsRows || [], "row"),
@@ -990,6 +1094,9 @@ function getStatus() {
     hasKey: hasKey(),
     selectedSeasonId,
     backup: backupInfo, // temporada aplicada pelo backup do Drive (null: pela API ou nenhuma)
+    wanted, // temporada escolhida no painel
+    desiredSource,
+    apiFailing,
     classes: cache.classes.length,
     driversMapped: cache.drivers.length,
     leagueName: cache.league && cache.league.leagueInfo && cache.league.leagueInfo.leagueName,
@@ -1028,6 +1135,7 @@ async function syncChanges() {
 }
 
 module.exports = {
+  setDesiredSource,
   setAutoClassContext,
   setBackupSource,
   setManualClasses,

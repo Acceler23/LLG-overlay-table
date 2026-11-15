@@ -72,8 +72,14 @@ function formatTime(ms) {
 // TEAM_LOGO_OVERRIDES do drivers-config.js.
 function setBgLogo(img, teamName, carName, variant) {
   if (!img) return;
-  logoLoader.load(img, LLGDisplay.logoPaths(teamName, carName, teamLogoOverrides, variant));
+  logoLoader.load(img, LLGDisplay.logoPaths(teamName, carName, teamLogoOverrides, variant, logoPrefer));
 }
+
+// Logo da equipe ("team") ou do carro ("car"), escolhido no painel (igual a tabela)
+let logoPrefer = "team";
+try {
+  if (localStorage.getItem("logoPrefer") === "car") logoPrefer = "car";
+} catch (_) {}
 
 function rltDisplayName(entry) {
   const fallback = (entry && entry.name) || "";
@@ -576,6 +582,12 @@ function connect() {
           const pl = msg.payload || {};
           battlePage = { active: !!pl.active, standings: typeof pl.standings === "boolean" ? pl.standings : null, at: Date.now() };
           if (battlePage.standings !== null) standingsView = battlePage.standings; // a copia daqui acompanha a tabela
+          render();
+        } else if (name === "overlay.setLogoMode") {
+          logoPrefer = msg.payload && msg.payload.value === "car" ? "car" : "team";
+          try {
+            localStorage.setItem("logoPrefer", logoPrefer);
+          } catch (_) {}
           render();
         } else if (name === "overlay.toggleStandings") {
           standingsView = !!(rltConfig && rltConfig.standingsRows && rltConfig.standingsRows.length) && !showingStandings();

@@ -77,7 +77,6 @@
     document.querySelectorAll(".settings [data-modos]").forEach((el) => {
       el.hidden = !el.dataset.modos.split(",").includes(modoAjustes);
     });
-    $("linksBadge").style.visibility = modoAjustes === "transmissao" ? "" : "hidden";
     const permitidas = [...document.querySelectorAll(".cat")].filter((b) => !b.hidden).map((b) => b.dataset.cat);
     const lembrada = store.get(`llgAjustes_${modoAjustes}`);
     categoria(permitidas.includes(cat) ? cat : permitidas.includes(lembrada) ? lembrada : permitidas[0]);
@@ -91,6 +90,7 @@
     store.set(`llgAjustes_${modoAjustes}`, cat);
     if (cat === "engenheiro") carregarVozes();
     if (cat === "liga") carregarSemClasse();
+    if (cat === "sistema") carregarPorta();
     document.querySelector(".screens").scrollTop = 0;
   };
 
@@ -124,6 +124,93 @@
     return lider ? ` · V${Math.min(lider.currentLap || 0, s.lapsInEvent)}/${s.lapsInEvent}` : "";
   }
 
+  // Direcao de prova: o botao fica sempre na tela inicial (antes so aparecia com
+  // o LMU em sessao, e nao dava para preparar as mensagens antes); sem o LMU
+  // aberto ele fica apagado e diz isso
+  function marcarDirecao(lmuNow) {
+    const b = $("homeDirecao");
+    b.hidden = false;
+    b.classList.toggle("off", !lmuNow);
+    b.querySelector(".s").textContent = lmuNow ? "FCY e Safety Car · Le Mans Ultimate" : "FCY e Safety Car · Le Mans Ultimate (fechado agora)";
+  }
+
+  // ---- porta do aplicativo (Ajustes > Sistema) ----
+  async function carregarPorta() {
+    try {
+      const r = await api("GET", "/api/system/port");
+      if (document.activeElement !== $("httpPort")) $("httpPort").value = r.saved;
+      $("portStatus").textContent = r.fixedByEnv ? `Usando a porta ${r.port}, definida pela variável HTTP_PORT (não muda por aqui).` : r.saved !== r.port ? `Agora: ${r.port}. A porta ${r.saved} vale ao abrir o aplicativo de novo.` : `Usando a porta ${r.port}.`;
+    } catch (_) {}
+  }
+
+  window.salvarPorta = async function (valor) {
+    const port = Number(valor || $("httpPort").value);
+    $("portStatus").textContent = "Conferindo…";
+    let r;
+    try {
+      r = await api("POST", "/api/system/port", { port });
+    } catch (err) {
+      $("portStatus").textContent = "Não deu: " + err.message;
+      return;
+    }
+    $("httpPort").value = r.port;
+    if (!r.restartNeeded) {
+      $("portStatus").textContent = `Usando a porta ${r.port}.`;
+      return;
+    }
+    if (inApp && window.llgApp.relaunch) {
+      if (confirm(`A porta ${r.port} foi salva. Abrir o aplicativo de novo agora para valer?\n\nNo OBS, depois use "Montar no OBS" para atualizar os links.`)) {
+        window.llgApp.relaunch();
+        return;
+      }
+    }
+    $("portStatus").textContent = `Porta ${r.port} salva: vale ao abrir o aplicativo de novo. No OBS, depois use "Montar no OBS".`;
+  };
+
+  // tabela completa: abre no navegador padrao (no aplicativo, os links do painel abrem fora)
+  window.abrirCompleta = function () {
+    window.open($("linkFull").value || "/overlay/full-timing.html", "_blank");
+  };
+
+  // Links das overlays do piloto (quadro no Pilotar): a mesma pagina que o
+  // aplicativo abre por cima do jogo, para outro monitor, o navegador ou o OBS
+  function linkDoPiloto(id) {
+    const base = `http://localhost:${location.port || 8080}/overlay/`;
+    return {
+      tabela: base + "driver-table.html",
+      telemetria: base + "telemetria.html",
+      gforce: base + "g-force.html?piloto=1",
+      completa: base + "full-timing.html",
+    }[id];
+  }
+
+  window.linkPiloto = async function (id, acao, btn) {
+    const url = linkDoPiloto(id);
+    if (!url) return;
+    if (acao === "abrir") {
+      window.open(url, "_blank");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch (_) {
+      const t = document.createElement("textarea"); // reserva: sem acesso a area de transferencia
+      t.value = url;
+      document.body.appendChild(t);
+      t.select();
+      document.execCommand("copy");
+      t.remove();
+    }
+    if (btn) {
+      btn.textContent = "Copiado";
+      btn.classList.add("ok");
+      setTimeout(() => {
+        btn.textContent = "Copiar";
+        btn.classList.remove("ok");
+      }, 1500);
+    }
+  };
+
   function renderJogo() {
     const chip = $("chipGame");
     const vivo = jogo && Date.now() - ultimoDado < 4000;
@@ -133,7 +220,7 @@
       chip.querySelector("span").textContent = "Sem jogo";
       chip.title = "Nenhum jogo em sessão";
       $("homeInfo").textContent = "Aguardando o jogo: entre numa sessão no AMS2, LMU, ACC ou Assetto Corsa.";
-      $("homeDirecao").hidden = true;
+      marcarDirecao(false);
       return;
     }
     const s = jogo.session || {};
@@ -144,7 +231,7 @@
       ? `${NOMES[jogo.game] || jogo.game} aberto, no menu.`
       : `${NOMES[jogo.game] || jogo.game} · ${pista(s) || "pista"} · ${jogo.standings.length} carros${foco ? ` · em foco: ${foco.name}` : ""}`;
     // a direcao de prova so existe no LMU
-    $("homeDirecao").hidden = jogo.game !== "lmu";
+    marcarDirecao(jogo.game === "lmu");
   }
 
   function conectar() {
@@ -786,14 +873,20 @@
         temporada = d.seasonName || d.pausedSeasonName || "";
         carregarSemClasse();
         temporadaPausada = !!d.paused;
-        // no topo: a temporada so vale numa sessao da liga (multijogador)
+        // no topo: de onde vem a temporada agora. API numa sessao da liga; backup do
+        // Drive em single player ou com a API fora do ar; pausada sem backup fora da liga
         const st = $("seasonState");
+        const backup = !temporadaPausada && d.source === "backup";
         st.hidden = !temporada;
-        st.textContent = temporadaPausada ? "Pausada" : "Ativa";
+        st.textContent = temporadaPausada ? "Pausada" : backup ? "Backup" : "Ativa";
         st.classList.toggle("ok", !temporadaPausada);
         st.title = temporadaPausada
-          ? "Fora de uma sessão da liga (offline ou sem pilotos do lineup): as overlays mostram só os dados do jogo"
-          : "Sessão da liga: nomes, equipes, classes e pontos do RLT nas overlays";
+          ? "Fora de uma sessão da liga e sem backup desta temporada: as overlays mostram só os dados do jogo"
+          : backup
+            ? d.backupReason === "api"
+              ? "A API do RLT não respondeu: nomes, equipes e pontos vêm do backup da liga (Drive). A API é tentada de novo a cada 5 min."
+              : "Sessão single player (fora da liga): nomes, equipes e pontos vêm do backup da liga (Drive), sem gastar a API"
+            : "Sessão da liga: nomes, equipes, classes e pontos da API do RLT nas overlays";
         renderPreparar();
       } catch (_) {}
     });

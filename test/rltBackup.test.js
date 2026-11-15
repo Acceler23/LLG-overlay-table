@@ -148,3 +148,22 @@ test("copia guardada: a exportacao antiga sai quando chega uma nova", async () =
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("piloto so do lineup: primeiro e ultimo nome do drivers.json, e nao o nome inteiro", async () => {
+  const { dir, files, backup } = setup();
+  try {
+    files.json.DRV.push({ Name: "Fulano de Tal da Silva Sauro", FirstName: "Fulano", LastName: "Sauro", InGameName: "FSauro" });
+    files.json.LINE.push({ Driver: "Fulano de Tal da Silva Sauro", Team: "chevrolet.x" });
+    const s = await backup.loadSeason("drive:SEASON1");
+    const d = s.lineupDrivers.find((x) => x.driverName === "Fulano de Tal da Silva Sauro");
+    assert.equal(d.driverInfo.firstName, "Fulano");
+    assert.equal(d.driverInfo.lastName, "Sauro");
+    const rlt = require("../server/rltClient");
+    const rows = rlt.buildStandingsRows(rlt.mergeLineupIntoStandings(s.standings, s.lineupDrivers), s.classes);
+    assert.equal(rows.find((r) => r.driverName === "Fulano de Tal da Silva Sauro").displayName, "Fulano Sauro");
+    // sem primeiro/ultimo nome no drivers.json: o nome como esta
+    assert.equal(rows.find((r) => r.driverName === "Reserva Um").displayName, "Reserva Um");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

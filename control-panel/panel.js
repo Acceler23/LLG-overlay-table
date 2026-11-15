@@ -21,6 +21,21 @@ socket.addEventListener("message", async (ev) => {
     window.__panelBuildId = msg.panelBuildId;
     return;
   }
+  // tempo do rodizio da tabela (o servidor manda ao conectar e quando muda)
+  if (msg.type === "overlayCommand" && msg.name === "overlay.setRotateSeconds") {
+    const slider = document.getElementById("rotSeconds");
+    const v = Number(msg.payload && msg.payload.value) || 10;
+    if (slider && document.activeElement !== slider) slider.value = v;
+    const man = document.getElementById("rotManual");
+    if (man) man.checked = !!(msg.payload && msg.payload.manual);
+    showRotateSeconds(v);
+    return;
+  }
+  // logo da equipe ou do carro (o servidor manda ao conectar e quando muda)
+  if (msg.type === "overlayCommand" && msg.name === "overlay.setLogoMode") {
+    showLogoMode(msg.payload && msg.payload.value);
+    return;
+  }
   // opacidade da transmissao (do jogo que entrou na sessao, ou de outro painel):
   // os sliders acompanham
   if (msg.type === "overlayCommand" && msg.name === "overlay.setOpacity" && msg.payload) {
@@ -56,6 +71,39 @@ function send(name, payload = {}) {
   } else {
     console.warn("Socket ainda nao esta aberto");
   }
+}
+
+// Tempo de cada pagina do rodizio da tabela (quem passa da 10a posicao), em segundos
+function showRotateSeconds(v) {
+  const el = document.getElementById("rotSecondsVal");
+  const man = document.getElementById("rotManual");
+  const manual = !!(man && man.checked);
+  if (el) el.textContent = manual ? "manual" : v + " s";
+  const slider = document.getElementById("rotSeconds");
+  if (slider) slider.disabled = manual;
+  const tile = document.getElementById("tileRotState");
+  if (tile) tile.textContent = manual ? "manual" : "automático, " + v + " s";
+}
+function setRotateSeconds(v) {
+  const slider = document.getElementById("rotSeconds");
+  if (v == null) v = slider ? slider.value : 10;
+  const man = document.getElementById("rotManual");
+  showRotateSeconds(v);
+  send("overlay.setRotateSeconds", { value: Number(v), manual: !!(man && man.checked) });
+}
+
+// Logo da equipe ("team") ou do carro ("car") na tabela da live e no driver card
+var logoModeNow = "team";
+function showLogoMode(value) {
+  logoModeNow = value === "car" ? "car" : "team";
+  const box = document.getElementById("logoCar");
+  if (box) box.checked = logoModeNow === "car";
+  const tile = document.getElementById("tileLogoState");
+  if (tile) tile.textContent = logoModeNow === "car" ? "Carro" : "Equipe";
+}
+function setLogoMode(value) {
+  showLogoMode(value);
+  send("overlay.setLogoMode", { value: logoModeNow });
 }
 
 function setOpacity(target, value) {

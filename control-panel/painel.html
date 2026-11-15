@@ -25,7 +25,7 @@
       <div class="muted" id="firstRunStatus"></div>
       <div class="row">
         <button class="btn" onclick="skipFirstRun()">Usar sem chave</button>
-        <span class="muted">Sem a chave, só os dados do jogo, sem equipes nem pontuação.</span>
+        <span class="muted">Sem a chave, as temporadas do backup da liga continuam funcionando (escolha no topo); sem temporada, só os dados do jogo.</span>
       </div>
     </div>
   </div>
@@ -105,6 +105,16 @@
             <button class="ovrow" id="rowSpotter" onclick="alternarEng('spotter')"><span><b>Spotter</b><small>Esquerda, direita, livre</small></span><span class="toggle"><i></i></span></button>
           </div>
         </div>
+        <!-- links das overlays do piloto: para outro monitor, o navegador ou o OBS -->
+        <div class="tile big" id="tileLinks">
+          <span class="t">Links das overlays</span>
+          <div class="ovlist">
+            <div class="ovrow linkrow"><span><b>Tabela</b><small>Posições e pontos</small></span><span class="linkbtns"><button class="btn sm" onclick="linkPiloto('tabela', 'copiar', this)">Copiar</button><button class="btn sm" onclick="linkPiloto('tabela', 'abrir', this)">Abrir</button></span></div>
+            <div class="ovrow linkrow"><span><b>Telemetria</b><small>Pedais e volante</small></span><span class="linkbtns"><button class="btn sm" onclick="linkPiloto('telemetria', 'copiar', this)">Copiar</button><button class="btn sm" onclick="linkPiloto('telemetria', 'abrir', this)">Abrir</button></span></div>
+            <div class="ovrow linkrow"><span><b>Força G</b><small>Círculo de forças</small></span><span class="linkbtns"><button class="btn sm" onclick="linkPiloto('gforce', 'copiar', this)">Copiar</button><button class="btn sm" onclick="linkPiloto('gforce', 'abrir', this)">Abrir</button></span></div>
+            <div class="ovrow linkrow"><span><b>Tabela completa</b><small>Todos os carros e o log</small></span><span class="linkbtns"><button class="btn sm" onclick="linkPiloto('completa', 'copiar', this)">Copiar</button><button class="btn sm" onclick="ir('completa')">Opções</button></span></div>
+          </div>
+        </div>
       </div>
       <p class="hint center-text" id="pilotHint">O jogo precisa estar em <b>janela sem bordas</b>. Em tela cheia exclusiva as overlays não aparecem.</p>
       <div class="tile off" id="pilotNoApp" hidden style="min-height:auto"><span class="t">Abra pelo aplicativo</span><span class="s">As overlays por cima do jogo só existem no aplicativo LLG Overlay. Aqui no navegador dá para usar o Engenheiro e os Ajustes.</span></div>
@@ -132,6 +142,21 @@
       </div>
     </section>
 
+    <!-- ============================================================ TABELA COMPLETA -->
+    <section class="screen" data-screen="completa" data-title="Tabela completa">
+      <p class="hint">Todos os carros com as colunas lado a lado (posição, classe, equipe, intervalos, voltas e stint) e, à direita, o log da corrida (ultrapassagens, melhores voltas, box, punições). Para outro monitor enquanto pilota, para o navegador ou como fonte do OBS.</p>
+      <div class="card">
+        <div class="row"><input id="linkFull" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkFull')">Copiar</button><button class="btn primary" onclick="abrirCompleta()">Abrir no navegador</button></div>
+        <label class="check row"><input id="fullCenter" type="checkbox" onchange="setFullCenter(this.checked)" /> Manter o piloto em foco no meio da tabela</label>
+        <div class="row wrap">
+          <button class="btn" onclick="send('overlay.fullScroll', { dir: -1 })">▲ Subir</button>
+          <button class="btn" onclick="send('overlay.fullScroll', { dir: 1 })">▼ Descer</button>
+          <button class="btn" onclick="send('overlay.fullScroll', { dir: 0 })" title="Desfaz a rolagem manual: volta ao topo, ou ao piloto em foco se a opção acima estiver ligada.">Voltar</button>
+        </div>
+        <p class="lead">Subir e Descer rolam a lista meia tela por vez. Com a opção de cima ligada, a rolagem manual vale por 20 s e depois a lista volta para o piloto em foco. A tecla 0 troca entre as posições e a pontuação, junto com a tabela da live.</p>
+      </div>
+    </section>
+
     <!-- ============================================================ TRANSMITIR -->
     <section class="screen" data-screen="transmissao" data-title="Transmitir">
       <div class="seg" id="txSeg">
@@ -149,9 +174,12 @@
           <button class="tile" onclick="send('overlay.toggleBattles')"><span class="k">9</span><span class="t">Disputas</span><span class="s">Carros colados</span></button>
           <button class="tile" onclick="send('overlay.toggleStandings')"><span class="k">0</span><span class="t">Pontos</span><span class="s">Campeonato</span></button>
         </div>
-        <div class="tiles cols-3" style="margin-top:14px">
+        <div class="tiles cols-6" style="margin-top:14px">
+          <button class="tile small" onclick="send('overlay.rotateNext')" oncontextmenu="send('overlay.rotatePrev');return false" title="Vira a parte da tabela que roda (depois do 10º). Clique: próxima · botão direito: anterior"><span class="k">- =</span><span class="t">Rodízio</span><span class="s" id="tileRotState">automático</span></button>
           <button class="tile small" onclick="send('overlay.toggleHighlight')"><span class="k">P</span><span class="t">Destaque</span></button>
           <button class="tile small" onclick="send('overlay.toggleGForce')"><span class="k">8</span><span class="t">G-force</span></button>
+          <button class="tile small" onclick="ir('completa')"><span class="t">Tabela completa</span><span class="s">abrir, rolar</span></button>
+          <button class="tile small" id="tileLogo" onclick="setLogoMode(logoModeNow === 'car' ? 'team' : 'car')"><span class="t">Logo</span><span class="s" id="tileLogoState">Equipe</span></button>
           <button class="tile small warn" onclick="if (confirm('Zerar as posições de largada, paradas e stint?')) send('race.reset')"><span class="t">Zerar largada</span><span class="s">use no grid</span></button>
         </div>
       </div>
@@ -208,6 +236,7 @@
           <button class="cat" data-cat="transmissao" data-modos="transmissao" onclick="categoria('transmissao')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="14" height="12" rx="2"/><path d="m16 10 6-3v10l-6-3"/></svg>Transmissão</button>
           <button class="cat" data-cat="liga" data-modos="piloto,transmissao" onclick="categoria('liga')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18.5 20a6.5 6.5 0 0 0-2.5-5.1"/></svg>Liga<span id="linksBadge" class="badge" hidden></span></button>
           <button class="cat" data-cat="direcao" data-modos="direcao" onclick="categoria('direcao')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 21V4M4 4h12l-2 4 2 4H4"/></svg>Direção</button>
+          <button class="cat" data-cat="jogos" data-modos="piloto,transmissao,direcao" onclick="categoria('jogos')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 4v16"/></svg>Jogos</button>
           <button class="cat" data-cat="sistema" data-modos="piloto,transmissao,direcao" onclick="categoria('sistema')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>Sistema</button>
         </nav>
 
@@ -284,7 +313,6 @@
               <button onclick="pular('aj-visual')">Visual</button>
               <button onclick="pular('aj-fotos')">Fotos e logos</button>
               <button onclick="pular('aj-pista')">Pista</button>
-              <button onclick="pular('aj-jogos')">LMU e ACC</button>
               <button onclick="pular('aj-links')">Links</button>
             </div>
 
@@ -319,6 +347,8 @@
                 </select>
               </div>
               <label class="check row"><input id="altEnabled" type="checkbox" onchange="setAlternate()" /> Alternar as colunas sozinho</label>
+              <div class="row"><span class="lbl">Rodízio da tabela</span><input id="rotSeconds" type="range" min="4" max="30" step="1" value="10" oninput="showRotateSeconds(this.value)" onchange="setRotateSeconds(this.value)" /><span id="rotSecondsVal" class="val">10 s</span></div>
+              <label class="check row"><input id="rotManual" type="checkbox" onchange="setRotateSeconds()" /> Rodízio manual (a página só vira no botão Rodízio, em Ao vivo)</label>
               <div class="row"><span class="lbl">Tempo em cada coluna</span><input id="altSeconds" type="range" min="5" max="120" step="5" value="20" oninput="showAlternateSeconds(this.value)" onchange="setAlternate()" /><span id="altSecondsVal" class="val">20 s</span></div>
             </div>
 
@@ -328,7 +358,7 @@
               <div class="row"><span class="lbl">Linhas da tabela</span><input id="opRows" type="range" min="0" max="100" value="100" oninput="setOpacity('rows', this.value)" /><span id="opRowsVal" class="val">100%</span></div>
               <div class="row"><span class="lbl">Mapa</span><input id="opMap" type="range" min="0" max="100" value="100" oninput="setOpacity('map', this.value)" /><span id="opMapVal" class="val">100%</span></div>
               <div class="row"><span class="lbl">Cor da equipe</span><input id="teamTint" type="range" min="0" max="100" value="50" oninput="setTeamTint(this.value)" /><span id="teamTintVal" class="val">50%</span></div>
-              <label class="check row"><input id="maxFps30" type="checkbox" onchange="setMaxFps(this.checked)" /> Limitar a 30 FPS, sem animações (PC fraco)</label>
+              <label class="check row"><input id="logoCar" type="checkbox" onchange="setLogoMode(this.checked ? 'car' : 'team')" /> Logo do carro em vez do logo da equipe (tabela da live e driver card)</label>
             </div>
 
             <div class="card" id="aj-fotos">
@@ -358,6 +388,18 @@
               <div class="muted" id="tsStatus"></div>
             </div>
 
+            <div class="card" id="aj-links">
+              <h3>Links das overlays</h3>
+              <p class="lead">Para montar o OBS à mão ou abrir noutro PC. Tamanhos: tabela 880×1080, card 560×210, mapa 420×400, G-force 300×420.</p>
+              <div class="row"><span class="lbl">Tabela</span><input id="linkTable" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkTable')">Copiar</button></div>
+              <div class="row"><span class="lbl">Driver card</span><input id="linkCard" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkCard')">Copiar</button></div>
+              <div class="row"><span class="lbl">Mapa</span><input id="linkMap" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkMap')">Copiar</button></div>
+              <div class="row"><span class="lbl">Tabela completa</span><button class="btn" onclick="ir('completa')">Link e opções da tabela completa</button></div>
+            </div>
+          </div>
+
+          <!-- ---------------------------------------- Ajustes · Jogos (todos os modos) -->
+          <div class="pane" data-cat="jogos">
             <div class="card" id="aj-jogos">
               <h3>Le Mans Ultimate</h3>
               <label class="check row"><input id="lmuFollow" type="checkbox" onchange="lmuSaveFollow()" /> Seguir o FCY e o Safety Car mandados no chat</label>
@@ -365,25 +407,11 @@
               <label class="check row"><input id="voiceOn" type="checkbox" onchange="saveVoice()" /> Tocar a contagem e os avisos (pode ir para a live)</label>
               <div class="row"><span class="lbl">Volume</span><input id="voiceVolume" type="range" min="0" max="100" step="5" onchange="saveVoice()" /><button class="btn" onclick="testVoice()">Testar</button></div>
               <div class="muted" id="voiceStatus"></div>
+              <div class="row wrap"><button class="btn" onclick="ir('direcao')">Direção de prova (FCY e Safety Car)</button></div>
               <h3 style="margin-top:22px">Assetto Corsa Competizione</h3>
               <label class="check row"><input id="accStintOn" type="checkbox" onchange="setAccStint()" /> A corrida tem tempo máximo de stint</label>
               <div class="row"><span class="lbl">Limite (minutos)</span><input id="accStintMin" type="number" min="1" max="600" step="1" value="35" onchange="setAccStint()" /></div>
               <div class="muted" id="accStintStatus"></div>
-            </div>
-
-            <div class="card" id="aj-links">
-              <h3>Links das overlays</h3>
-              <p class="lead">Para montar o OBS à mão ou abrir noutro PC. Tamanhos: tabela 880×1080, card 560×210, mapa 420×400, G-force 300×420.</p>
-              <div class="row"><span class="lbl">Tabela</span><input id="linkTable" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkTable')">Copiar</button></div>
-              <div class="row"><span class="lbl">Driver card</span><input id="linkCard" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkCard')">Copiar</button></div>
-              <div class="row"><span class="lbl">Mapa</span><input id="linkMap" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkMap')">Copiar</button></div>
-              <div class="row"><span class="lbl">Tabela completa</span><input id="linkFull" type="text" readonly onclick="this.select()" /><button class="btn" onclick="copyLink('linkFull')">Copiar</button></div>
-              <label class="check row"><input id="fullCenter" type="checkbox" onchange="setFullCenter(this.checked)" /> Tabela completa: manter o piloto em foco no meio</label>
-              <div class="row wrap">
-                <button class="btn" onclick="send('overlay.fullScroll', { dir: -1 })">▲ Subir</button>
-                <button class="btn" onclick="send('overlay.fullScroll', { dir: 1 })">▼ Descer</button>
-                <button class="btn" onclick="send('overlay.fullScroll', { dir: 0 })">Voltar</button>
-              </div>
             </div>
           </div>
 
@@ -404,12 +432,12 @@
               <div id="semClasseRows"></div>
               <div class="muted" id="semClasseStatus"></div>
             </div>
-            <div class="card" data-modos="transmissao">
+            <div class="card">
               <h3>Pilotos sem ligação</h3>
               <p class="lead">Nomes da pista que o RLT não reconheceu. Escolha o piloto do lineup; fica salvo para a temporada.</p>
               <div id="linksUnmatched"></div>
             </div>
-            <div class="card" data-modos="transmissao">
+            <div class="card">
               <h3>Ligados à mão ou ignorados</h3>
               <div id="linksManual"></div>
             </div>
@@ -452,6 +480,17 @@
 
           <!-- ---------------------------------------- Ajustes · Sistema -->
           <div class="pane" data-cat="sistema">
+            <div class="card" id="aj-porta">
+              <h3>Porta do aplicativo</h3>
+              <p class="lead">O painel e as overlays usam a porta <b>8080</b>. Se outro programa já usa essa porta (por exemplo, o software do volante PNX), troque aqui. Depois de trocar, o aplicativo abre de novo; no OBS, use "Montar no OBS" (Ajustes › Transmissão) para atualizar os links.</p>
+              <div class="row"><span class="lbl">Porta</span><input id="httpPort" type="number" min="1024" max="65535" step="1" /><button class="btn primary" onclick="salvarPorta()">Salvar</button><button class="btn" onclick="salvarPorta(8080)">Voltar para 8080</button></div>
+              <div class="muted" id="portStatus"></div>
+            </div>
+            <div class="card">
+              <h3>Desempenho</h3>
+              <label class="check row"><input id="maxFps30" type="checkbox" onchange="setMaxFps(this.checked)" /> Limitar as overlays a 30 FPS, sem animações (PC fraco)</label>
+              <p class="lead">Vale para todas as overlays: as do pilotar, por cima do jogo, e as da transmissão.</p>
+            </div>
             <div class="card">
               <h3>LLG Overlay</h3>
               <div class="row wrap"><span id="appVersion" style="font-weight:800">Versão —</span></div>

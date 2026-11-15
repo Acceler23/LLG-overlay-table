@@ -40,7 +40,10 @@ const { createRaceVoice } = require("./raceVoice");
 const savedRltKey = settings.getSecret("rltApiKey");
 if (!rlt.hasKey() && savedRltKey) rlt.setApiKey(savedRltKey);
 
-const HTTP_PORT = process.env.HTTP_PORT || 8080;
+// Porta do painel e das overlays: a escolhida no painel (settings "httpPort"),
+// ou 8080. A variavel HTTP_PORT (testes, desenvolvimento) tem prioridade.
+const ports = require("./ports");
+const HTTP_PORT = process.env.HTTP_PORT || ports.validPort(settings.get("httpPort")) || ports.DEFAULT_HTTP_PORT;
 const BRIDGE_PORT = process.env.BRIDGE_PORT || 5607;
 
 // Por padrao so este computador acessa o servidor. O painel troca pasta de
@@ -228,6 +231,20 @@ function useGameProfile(game) {
   });
 }
 
+// Logo da equipe ou do carro na tabela da live e no driver card: guardado aqui
+// e mandado a quem conecta (overlay recarregada no OBS)
+const logoModeCommand = () => ({ type: "overlayCommand", name: "overlay.setLogoMode", payload: { value: settings.get("logoMode") === "car" ? "car" : "team" } });
+// Tempo de cada pagina do rodizio da tabela (s): guardado e mandado a quem conecta
+const rotateCommand = () => ({ type: "overlayCommand", name: "overlay.setRotateSeconds", payload: { value: Number(settings.get("rotateSeconds")) || 10, manual: settings.get("rotateManual") === true } });
+wss.onCommand("overlay.setRotateSeconds", (payload) => {
+  const v = Math.max(4, Math.min(30, Math.round(Number(payload && payload.value)) || 10));
+  settings.set("rotateSeconds", v === 10 ? null : v);
+  settings.set("rotateManual", payload && payload.manual ? true : null);
+});
+wss.onCommand("overlay.setLogoMode", (payload) => {
+  settings.set("logoMode", payload && payload.value === "car" ? "car" : null);
+});
+
 // painel: opacidade da transmissao escolhida (o comando segue para as overlays)
 wss.onCommand("overlay.setOpacity", (payload) => {
   if (payload && payload.fromProfile) return; // e o proprio perfil sendo aplicado
@@ -387,18 +404,36 @@ const rltGate = createRltGate({
   hasSeason: () => !!rlt.getOverlayPayload(),
   linkedCount: () => linkStatus.linked.length,
   onChange: (live, why) => {
-    console.log(live ? `RLT ligado: sessao da liga (${why})` : `RLT pausado: sessao fora da liga (${why}); so dados do jogo`);
+    console.log(live ? `RLT ligado: sessao da liga (${why})` : `Fora da sessao da liga (${why}): backup da liga, se houver; senao so dados do jogo`);
     broadcastRlt();
+    useSessionSource();
   },
 });
 const refreshRltLive = () => rltGate.refresh();
 const noteGameSession = (data) => rltGate.noteSession(data);
 
-// O que as overlays recebem: a temporada inteira numa sessao da liga; fora
-// dela, so o aviso de que ha uma temporada pausada (o painel mostra o nome).
+// Fonte da temporada para a sessao: a API numa sessao da liga, o backup do
+// Drive em single player (server/rltClient.js setDesiredSource). Trocou: manda
+// a temporada de novo.
+function useSessionSource() {
+  rlt
+    .setDesiredSource(rltGate.isLive() ? "api" : "backup")
+    .then((changed) => {
+      if (!changed) return;
+      const cfg = rlt.getOverlayPayload();
+      console.log(cfg && cfg.source === "backup" ? "Temporada pelo backup do Drive (single player)" : "Temporada pela API do RLT (sessao da liga)");
+      updateLinkStatus();
+      broadcastRlt();
+    })
+    .catch(() => {});
+}
+
+// O que as overlays recebem: a temporada inteira numa sessao da liga, ou pelo
+// backup (single player, ou a API fora do ar); sem backup equivalente, fora da
+// sessao da liga, so o aviso de que ha uma temporada pausada (o painel mostra o nome).
 function rltPayloadForOverlays() {
   const cfg = rlt.getOverlayPayload();
-  if (!cfg || rltGate.isLive()) return cfg;
+  if (!cfg || cfg.source === "backup" || rltGate.isLive()) return cfg;
   return { seasonId: cfg.seasonId, paused: true, pausedSeasonName: cfg.seasonName || null };
 }
 
@@ -596,6 +631,8 @@ wss.onConnect((socket) => {
   if (socket.readyState === 1) socket.send(JSON.stringify({ type: "hello", buildId: overlayBuildId(), panelBuildId: panelBuildId() }));
   // opacidades do jogo atual (a tabela nao guarda as dela: recarregada, voltava a 100%)
   opacityCommands(profileGame).forEach((m) => socket.readyState === 1 && socket.send(JSON.stringify(m)));
+  if (socket.readyState === 1) socket.send(JSON.stringify(logoModeCommand())); // logo da equipe ou do carro
+  if (socket.readyState === 1) socket.send(JSON.stringify(rotateCommand())); // tempo do rodizio da tabela
   const payload = rltPayloadForOverlays();
   if (payload && socket.readyState === 1) {
     socket.send(JSON.stringify({ type: "rltConfig", data: payload }));
@@ -1078,6 +1115,24 @@ app.post("/api/assets/base", (req, res) => {
   }
 });
 
+// ---- porta do aplicativo (Ajustes > Sistema) ----
+// Trocar vale ao abrir o aplicativo de novo; no OBS, "Montar no OBS" corrige os links.
+app.get("/api/system/port", (req, res) => {
+  res.json({ ok: true, port: Number(HTTP_PORT), saved: ports.validPort(settings.get("httpPort")) || ports.DEFAULT_HTTP_PORT, fixedByEnv: !!process.env.HTTP_PORT, bridgePort: Number(BRIDGE_PORT) });
+});
+
+app.post("/api/system/port", async (req, res) => {
+  const port = ports.validPort(req.body && req.body.port);
+  if (!port) return res.status(400).json({ ok: false, error: "Porta invalida: use um numero de 1024 a 65535." });
+  if (port === Number(BRIDGE_PORT)) return res.status(400).json({ ok: false, error: `A porta ${port} ja e usada pelo proprio LLG Overlay (jogos).` });
+  if (port !== Number(HTTP_PORT) && !(await ports.isPortFree(port))) {
+    return res.status(409).json({ ok: false, error: `A porta ${port} esta em uso por outro programa. Escolha outra.` });
+  }
+  settings.set("httpPort", port === ports.DEFAULT_HTTP_PORT ? null : port);
+  console.log(`Porta do aplicativo: ${port} (vale ao abrir de novo)`);
+  res.json({ ok: true, port, restartNeeded: port !== Number(HTTP_PORT) });
+});
+
 app.get("/api/rlt/status", (req, res) => {
   res.json({ ok: true, ...rlt.getStatus(), cache: rlt.cacheStatus() });
 });
@@ -1203,7 +1258,10 @@ app.get("/api/rlt/seasons", async (req, res) => {
   if (!apiSeasons.length && !backupSeasons.length) {
     return res.status(502).json({ ok: false, error: apiError || backupError || "Nenhuma temporada" });
   }
-  res.json({ ok: true, seasons: apiSeasons.concat(backupSeasons), apiError, backupError });
+  // o backup nao aparece no menu: ele entra sozinho no lugar da temporada escolhida
+  // (single player, ou a API fora do ar). So sem nenhuma temporada da API (sem chave e
+  // nada guardado) o menu mostra as do backup, para ainda dar o que escolher.
+  res.json({ ok: true, seasons: apiSeasons.length ? apiSeasons : backupSeasons, apiError, backupError });
 });
 
 app.post("/api/rlt/season", async (req, res) => {
@@ -1216,8 +1274,10 @@ app.post("/api/rlt/season", async (req, res) => {
       broadcastRlt();
       return res.json({ ok: true, payload, status: rlt.getStatus(), mode: "game-only" });
     }
+    await rlt.setDesiredSource(rltGate.isLive() ? "api" : "backup"); // single player: direto ao backup
     const payload = await rlt.selectSeason(seasonId);
     settings.set("seasonId", rlt.isBackupId(seasonId) ? seasonId : Number(seasonId)); // "drive:...": temporada do backup
+    settings.set("seasonName", (payload && payload.seasonName) || null); // para achar o backup sem a API
     updateLinkStatus(); // ja decide se a sessao atual e da liga
     broadcastRlt();
     res.json({ ok: true, payload, status: rlt.getStatus() });
@@ -1381,6 +1441,16 @@ ready.catch((err) => {
   if (require.main === module) process.exit(1);
 });
 
+// Outro programa ouvindo so em 127.0.0.1 nesta porta: conta como ocupada (sem
+// isso o app abria em todos os enderecos e o painel mostrava o outro programa)
+ports.isLocalPortFree(Number(HTTP_PORT)).then((free) => {
+  if (free) return listenHttp();
+  const err = new Error(`listen EADDRINUSE: address already in use 127.0.0.1:${HTTP_PORT}`);
+  err.code = "EADDRINUSE";
+  server.emit("error", err);
+});
+
+function listenHttp() {
 server.listen(HTTP_PORT, async () => {
   refreshAvatars().catch(() => {}); // fotos dos pilotos (driver card)
   console.log(`Tabela de tempos em      http://localhost:${HTTP_PORT}/overlay/timing-table.html`);
@@ -1394,40 +1464,37 @@ server.listen(HTTP_PORT, async () => {
   console.log(ALLOW_LAN ? "Acesso liberado para a rede local (ALLOW_LAN)." : "Acesso restrito a este computador.");
   console.log(assetsBaseUrl ? `Imagens: ${assetsBaseUrl} (reserva: pasta local)` : "Imagens: somente pasta local.");
   if (!rlt.hasKey()) console.log("RLT sem chave: salve pelo painel ou defina RLT_API_KEY no arquivo .env.");
-  // temporada do backup do Drive: reaplica sem precisar da API
-  const savedBackupSeason = settings.get("seasonId");
-  if (rlt.isBackupId(savedBackupSeason)) {
-    try {
-      const payload = await rlt.selectSeason(savedBackupSeason);
-      updateLinkStatus();
-      broadcastRlt();
-      console.log(`Temporada reaplicada (backup do Drive): ${(payload && payload.seasonName) || savedBackupSeason}`);
-    } catch (err) {
-      console.warn("Backup do Drive: nao foi possivel carregar agora:", err.message);
-    }
-  }
   if (rlt.hasKey()) {
     try {
       // o que mudou no RLT enquanto o aplicativo estava fechado (o resto vem do cache)
       await rlt.syncChanges();
       await rlt.fetchLeague();
       await rlt.fetchSeasons();
-      // reaplica a temporada que estava em uso antes de fechar
-      const savedSeason = settings.get("seasonId");
-      if (savedSeason && !rlt.isBackupId(savedSeason)) {
-        const payload = await rlt.selectSeason(savedSeason);
-        broadcastRlt();
-        console.log(`Temporada do RLT reaplicada: ${(payload && payload.seasonName) || savedSeason}`);
-      } else {
-        rlt.startRefresh();
-      }
     } catch (err) {
       console.warn("RLT: nao foi possivel carregar agora:", err.message);
+    }
+  }
+  // reaplica a temporada que estava em uso antes de fechar. Ao abrir ainda nao ha
+  // sessao da liga: vai pelo backup de mesmo nome (sem gastar a API) e passa para a
+  // API quando a sessao da liga comecar; sem backup, pela API.
+  const savedSeason = settings.get("seasonId");
+  if (savedSeason) {
+    try {
+      await rlt.setDesiredSource(rltGate.isLive() ? "api" : "backup");
+      const payload = await rlt.selectSeason(savedSeason, settings.get("seasonName"));
+      updateLinkStatus();
+      broadcastRlt();
+      console.log(`Temporada reaplicada: ${(payload && payload.seasonName) || savedSeason} (${payload && payload.source === "backup" ? "backup do Drive" : "API do RLT"})`);
+    } catch (err) {
+      console.warn("Temporada: nao foi possivel reaplicar agora:", err.message);
       rlt.startRefresh();
     }
-    loadTrackStats(true).catch(() => {});
+  } else if (rlt.hasKey()) {
+    rlt.startRefresh();
   }
+  if (rlt.hasKey()) loadTrackStats(true).catch(() => {});
 });
+}
 
 if (alternate.enabled) restartAlternate();
 

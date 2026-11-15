@@ -381,6 +381,11 @@ ipcMain.on("pilot:lock", () => {
   if (panelWin) panelWin.webContents.send("pilot:changed", pilotState());
 });
 ipcMain.handle("pilot:get", () => pilotState());
+// reiniciar o aplicativo (porta nova): os scripts dos jogos fecham sozinhos com ele
+ipcMain.handle("app:relaunch", () => {
+  app.relaunch();
+  app.exit(0);
+});
 ipcMain.handle("pilot:set", (_event, patch) => setPilot(patch));
 
 ipcMain.handle("driver:get", () => state.driver);
@@ -565,12 +570,32 @@ if (!app.requestSingleInstanceLock()) {
       await server.ready;
     } catch (err) {
       const busy = err && err.code === "EADDRINUSE";
-      dialog.showErrorBox(
-        "LLG Overlay",
-        busy
-          ? `A porta ${(server && server.HTTP_PORT) || 8080} ja esta em uso.\n\nO LLG Overlay ja esta aberto, ou o start.bat antigo esta rodando. Feche o outro e abra de novo.`
-          : `Nao foi possivel iniciar o servidor:\n${(err && err.message) || err}`
-      );
+      if (busy) {
+        // porta ocupada: o LLG Overlay ja aberto, ou outro programa usando a porta
+        // (ex: o software do volante PNX). Oferece outra porta livre na hora; sem
+        // isso nao daria nem para abrir o painel e trocar.
+        const used = Number((server && server.HTTP_PORT) || 8080);
+        const portsLib = require(path.join(ROOT, "server", "ports.js"));
+        const free = await portsLib.findFreePort(used === 8080 ? 8090 : used + 1, [Number((server && server.BRIDGE_PORT) || 5607)]);
+        const choice = free
+          ? dialog.showMessageBoxSync({
+              type: "warning",
+              title: "LLG Overlay",
+              message: `A porta ${used} ja esta em uso.`,
+              detail: `Se o LLG Overlay ja esta aberto (ou o start.bat antigo), feche o outro e abra de novo.\n\nSe a porta e usada por outro programa (por exemplo, o software do volante PNX), o LLG Overlay pode passar a usar a porta ${free}. Depois, no OBS, use "Montar no OBS" no painel para atualizar os links.`,
+              buttons: [`Usar a porta ${free}`, "Fechar"],
+              defaultId: 0,
+              cancelId: 1,
+            })
+          : 1;
+        if (choice === 0 && free) {
+          require(path.join(ROOT, "server", "settings.js")).set("httpPort", free);
+          app.relaunch();
+        }
+        app.exit(choice === 0 && free ? 0 : 1);
+        return;
+      }
+      dialog.showErrorBox("LLG Overlay", `Nao foi possivel iniciar o servidor:\n${(err && err.message) || err}`);
       app.exit(1);
       return;
     }
